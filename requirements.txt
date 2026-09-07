@@ -1,0 +1,34 @@
+# --- Scraping ---
+requests
+httpx
+beautifulsoup4
+lxml
+playwright
+tenacity
+
+# --- Almacenamiento / datos ---
+pandas
+# SQLite viene incluido en la libreria estandar de Python
+
+# --- Fuentes externas con libreria propia ---
+nba_api
+pbpstats
+euroleague-api
+
+# --- Visualizacion ---
+matplotlib
+seaborn
+mplbasketball
+
+# --- Modelado ---
+scikit-learn
+xgboost
+joblib
+
+# --- Servicio ---
+flask
+streamlit
+
+# --- Orquestacion (opcional, fase 7 -- descomentar si hace falta) ---
+# prefect
+# apache-airflow
