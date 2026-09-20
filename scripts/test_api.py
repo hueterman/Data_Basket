@@ -1,0 +1,253 @@
+r"""Prueba de humo del API REST (api/app.py + src/predict.py).
+
+Dos partes:
+1. MECANICA, con datos sinteticos minimos (2 equipos, un puñado de
+   partidos fabricados a mano en una base de datos SQLite de prueba,
+   NO datos reales de ninguna fuente) -- comprueba que
+   latest_team_features()/predict_game() calculan lo que deberian y que
+   los casos de error (equipo sin historial, source vacio, modelo
+   inexistente...) devuelven PredictionError en vez de reventar, sin
+   depender de si train.py se ha ejecutado ya o no. Un pequeño modelo
+   de mentira (LogisticRegression entrenado con datos aleatorios, solo
+   para poder llamar a predict_proba con la forma correcta) se guarda
+   en un MODELS_DIR temporal para no tocar los modelos reales.
+2. INTEGRACION real, SOLO si ya existen los modelos reales entrenados
+   por train.py (models/game_outcome_*.joblib) y hay datos reales en
+   data/processed/basketball.db -- monta un cliente de pruebas de Flask
+   (sin levantar el servidor de verdad) y pega a /health, /model/info,
+   /teams y /predict con dos equipos reales de la fuente con mas
+   partidos, imprimiendo la respuesta real para poder revisarla a ojo
+   antes de dar el API por buena. Se salta con un aviso si los modelos
+   reales no existen todavia (no es un fallo de esta prueba).
+
+Uso:
+    cd D:\Proyectos\Data_Basket
+    python scripts\test_api.py
+"""
+from __future__ import annotations
+
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import joblib
+import numpy as np
+from sklearn.linear_model import LogisticRegression
+
+from src.pipeline.db import get_connection
+from src.pipeline.repository import upsert_games, upsert_teams, upsert_boxscore
+from src.scraper.base import BoxscoreData, GameRef, Player, PlayerStatLine, Team, TeamStatLine
+
+SOURCE = "acb"  # fuente entrenable real, basta para fabricar datos sinteticos
+
+
+def _team_stat_line(game_id: str, team_id: str, *, made2: int, att2: int, made3: int,
+                     att3: int, ftm: int, fta: int, orb: int, drb: int, tov: int) -> TeamStatLine:
+    return TeamStatLine(
+        game_id=game_id, team_id=team_id,
+        t2_made=made2, t2_att=att2, t3_made=made3, t3_att=att3,
+        ft_made=ftm, ft_att=fta, reb_off=orb, reb_def=drb,
+        ast=10, stl=5, turnovers=tov, blocks=2, fouls=15,
+        val=made2 * 2 + made3 * 3 + ftm,
+    )
+
+
+def _player_stats(game_id: str, team_id: str) -> list[PlayerStatLine]:
+    """5 jugadores/as con 40 minutos cada uno -- team_minutes = 200/5 = 40
+    (partido completo sin prorroga), necesario para que pace_40/ortg/drtg
+    en build_team_game_features() no salgan NaN (dependen de team_minutes,
+    que sale de player_stats -- sin esto TODAS las features de ritmo
+    quedan en NaN, bug de fixture ya pillado una vez al validar esto)."""
+    return [
+        PlayerStatLine(
+            game_id=game_id, player_id=f"{team_id}_p{i}", player_name=f"Jugador {i}",
+            team_id=team_id, minutes=40.0, points=8, rebounds=4, assists=2, val=10,
+        )
+        for i in range(5)
+    ]
+
+
+def build_fixture_db(db_path: Path) -> None:
+    """Fabrica una base de datos minima con 2 equipos y 6 partidos
+    jugados (3 cada uno como local, historial de sobra para pasar
+    min_prior_games=5 solo si se combinan -- a proposito se deja a un
+    equipo con menos de 5 para probar el aviso de "poco historial")."""
+    conn = get_connection(db_path)
+    upsert_teams(conn, [
+        Team(team_id="T1", name="Equipo Uno", source=SOURCE),
+        Team(team_id="T2", name="Equipo Dos", source=SOURCE),
+        Team(team_id="T3", name="Rival Generico", source=SOURCE),
+    ])
+
+    games = []
+    boxscores = []
+    # T1 gana 6 partidos consecutivos contra T3 (equipo fuerte) -- fechas
+    # en orden para que "temporada mas reciente" sea inequivoca.
+    for i in range(6):
+        gid = f"g_t1_{i}"
+        games.append(GameRef(
+            game_id=gid, source=SOURCE, season="2025-26", round=i, date=f"2025-10-{i+1:02d}",
+            home_team_id="T1", away_team_id="T3", home_score=80, away_score=60, played=True,
+        ))
+        boxscores.append(BoxscoreData(game_id=gid, team_stats=[
+            _team_stat_line(gid, "T1", made2=20, att2=35, made3=6, att3=15, ftm=8, fta=10, orb=10, drb=25, tov=10),
+            _team_stat_line(gid, "T3", made2=15, att2=40, made3=4, att3=16, ftm=8, fta=12, orb=12, drb=20, tov=15),
+        ], player_stats=_player_stats(gid, 'T1') + _player_stats(gid, 'T3')))
+
+    # T2 solo tiene 2 partidos jugados esta temporada -- a proposito,
+    # para comprobar el aviso de "poco historial" en predict_game().
+    for i in range(2):
+        gid = f"g_t2_{i}"
+        games.append(GameRef(
+            game_id=gid, source=SOURCE, season="2025-26", round=i, date=f"2025-10-{i+1:02d}",
+            home_team_id="T2", away_team_id="T3", home_score=65, away_score=70, played=True,
+        ))
+        boxscores.append(BoxscoreData(game_id=gid, team_stats=[
+            _team_stat_line(gid, "T2", made2=14, att2=38, made3=3, att3=14, ftm=6, fta=9, orb=8, drb=18, tov=14),
+            _team_stat_line(gid, "T3", made2=17, att2=39, made3=5, att3=15, ftm=9, fta=11, orb=11, drb=22, tov=12),
+        ], player_stats=_player_stats(gid, 'T2') + _player_stats(gid, 'T3')))
+
+    upsert_games(conn, games)
+    for bs in boxscores:
+        upsert_boxscore(conn, SOURCE, bs)
+    conn.close()
+
+
+def fit_dummy_model(feature_cols: list[str]):
+    """Modelo de mentira, SOLO para probar la mecanica de carga/predict_proba
+    (forma de entrada/salida) -- nunca se compara su probabilidad con
+    nada real, no tiene ningun sentido basketbolistico."""
+    rng = np.random.default_rng(0)
+    X = rng.normal(size=(40, len(feature_cols)))
+    y = (X[:, 0] > 0).astype(int)
+    model = LogisticRegression().fit(X, y)
+    return model
+
+
+def test_mechanics() -> None:
+    print("=== 1) Mecanica (datos sinteticos, sin tocar la base de datos real) ===")
+    tmp_dir = Path(tempfile.mkdtemp(prefix="test_api_"))
+    db_path = tmp_dir / "fixture.db"
+    build_fixture_db(db_path)
+
+    import src.predict as predict_mod
+    predict_mod.MODELS_DIR = tmp_dir
+    predict_mod._MODEL_FILES = {
+        "logreg": tmp_dir / "game_outcome_logreg.joblib",
+        "xgboost": tmp_dir / "game_outcome_xgb.joblib",
+    }
+    predict_mod._model_cache.clear()
+    model = fit_dummy_model(predict_mod.FEATURE_COLS)
+    joblib.dump(model, predict_mod._MODEL_FILES["logreg"])
+    joblib.dump(model, predict_mod._MODEL_FILES["xgboost"])
+
+    conn = get_connection(db_path)
+
+    feats_t1 = predict_mod.latest_team_features(conn, SOURCE, "T1")
+    print(f"  latest_team_features(T1): n_games={feats_t1['n_games']} season={feats_t1['season']} "
+          f"win={feats_t1['win']:.3f} ortg={feats_t1['ortg']:.1f}")
+    assert feats_t1["n_games"] == 6, "T1 deberia tener 6 partidos jugados"
+    assert feats_t1["win"] == 1.0, "T1 gano los 6 -- media de 'win' deberia ser 1.0"
+
+    result = predict_mod.predict_game(conn, SOURCE, "T1", "T2", model_name="logreg")
+    print(f"  predict_game(T1 local vs T2 visitante): "
+          f"home_win_probability={result['home_win_probability']} "
+          f"warnings={result['warnings']}")
+    assert result["home_games_played"] == 6 and result["away_games_played"] == 2
+    assert any("Visitante" in w for w in result["warnings"]), (
+        "T2 tiene solo 2 partidos (< 5) -- deberia salir un aviso de poco historial"
+    )
+
+    # Casos de error esperados -- deben lanzar PredictionError, no reventar.
+    for label, fn in [
+        ("mismo equipo local/visitante",
+         lambda: predict_mod.predict_game(conn, SOURCE, "T1", "T1")),
+        ("equipo inexistente",
+         lambda: predict_mod.latest_team_features(conn, SOURCE, "NO_EXISTE")),
+        ("source sin datos",
+         lambda: predict_mod.latest_team_features(conn, "nba", "T1")),
+        ("modelo desconocido",
+         lambda: predict_mod.predict_game(conn, SOURCE, "T1", "T2", model_name="no_existe")),
+    ]:
+        try:
+            fn()
+            raise AssertionError(f"  ERROR: {label!r} deberia haber lanzado PredictionError")
+        except predict_mod.PredictionError as exc:
+            print(f"  OK, error esperado ({label}): {exc}")
+
+    conn.close()
+    print("  Mecanica: todo OK.\n")
+
+
+def test_real_api_if_available() -> None:
+    print("=== 2) Integracion real (API + modelos reales de train.py, si existen) ===")
+    import src.predict as predict_mod
+    # Restaurar MODELS_DIR real (test_mechanics() lo habia redirigido a un
+    # directorio temporal) antes de comprobar los modelos de verdad.
+    real_models_dir = predict_mod.PROJECT_ROOT / "models"
+    predict_mod.MODELS_DIR = real_models_dir
+    predict_mod._MODEL_FILES = {
+        "logreg": real_models_dir / "game_outcome_logreg.joblib",
+        "xgboost": real_models_dir / "game_outcome_xgb.joblib",
+    }
+    predict_mod._model_cache.clear()
+
+    if not predict_mod.available_models():
+        print("  (sin modelos reales en models/ todavia -- ejecuta 'python train.py' "
+              "primero para probar esta parte. No es un fallo.)\n")
+        return
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "api"))
+    import app as api_app  # api/app.py
+
+    client = api_app.app.test_client()
+
+    r = client.get("/health")
+    print(f"  GET /health -> {r.status_code} {r.get_json()}")
+    assert r.status_code == 200
+
+    r = client.get("/model/info")
+    info = r.get_json()
+    print(f"  GET /model/info -> {r.status_code} available_models={info.get('available_models')} "
+          f"xgboost.accuracy={info.get('metrics', {}).get('xgboost', {}).get('accuracy')}")
+    assert r.status_code == 200
+
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT source, COUNT(*) AS n FROM games WHERE played = 1 GROUP BY source ORDER BY n DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    if row is None:
+        print("  (sin partidos jugados en la base de datos real -- no se puede probar /predict.)\n")
+        return
+    real_source = row["source"]
+
+    r = client.get(f"/teams?source={real_source}")
+    teams_real = r.get_json()
+    print(f"  GET /teams?source={real_source} -> {r.status_code}, {len(teams_real)} equipos")
+    assert r.status_code == 200 and len(teams_real) >= 2
+
+    home_id, away_id = teams_real[0]["team_id"], teams_real[1]["team_id"]
+    r = client.post("/predict", json={
+        "source": real_source, "home_team_id": home_id, "away_team_id": away_id,
+    })
+    pred = r.get_json()
+    print(f"  POST /predict ({real_source}: {home_id} local vs {away_id} visitante) -> "
+          f"{r.status_code} {pred}")
+    assert r.status_code == 200
+    assert 0.0 <= pred["home_win_probability"] <= 1.0
+
+    # Peticion mal formada -- debe devolver 400, no un 500.
+    r = client.post("/predict", json={"source": real_source, "home_team_id": home_id})
+    print(f"  POST /predict (sin away_team_id) -> {r.status_code} {r.get_json()}")
+    assert r.status_code == 400
+
+    print("  Integracion real: todo OK.\n")
+
+
+if __name__ == "__main__":
+    test_mechanics()
+    test_real_api_if_available()
+    print("Todas las pruebas pasaron.")
