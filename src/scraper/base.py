@@ -32,6 +32,21 @@ from typing import Protocol, runtime_checkable
 
 TRAINABLE_SOURCES: frozenset[str] = frozenset({
     "acb", "feb", "euroleague", "eurocup", "nextgen", "nba",
+    # Las demas competiciones de baloncestoenvivo.feb.es (FebSource,
+    # ver src/scraper/feb.py) -- MISMO sitio y MISMOS terminos de uso
+    # que "feb" (Primera FEB), asi que la misma clasificacion aplica.
+    # BUG REAL corregido 2026-09-20(d) (detectado por el usuario: "no
+    # aparecen las nuevas competiciones" en la pagina de resumen de la
+    # app): estas entradas faltaban aqui -- upsert_sources() (ver
+    # src/pipeline/repository.py) solo rellena la tabla `sources` (la
+    # que lee app/app.py para el resumen) a partir de ALL_SOURCES, NO
+    # de lo que realmente se haya ingerido, asi que una fuente ausente
+    # de aqui nunca aparece en el resumen por mucho que se ingiera de
+    # verdad. "lfendesa" tenia este mismo bug desde que se añadio
+    # (sesion anterior, sin detectar hasta ahora); el resto son las
+    # 6 añadidas hoy mismo (ver feb.py, "AMPLIACION 2026-09-20 (b)"/"(c)").
+    "lfendesa", "lfchallenge", "lf2", "ligau", "copaespaa",
+    "segundafeb", "tercerafeb",
 })
 
 NON_TRAINABLE_SOURCES: frozenset[str] = frozenset({
