@@ -48,17 +48,52 @@ riesgo de desajuste que eso conlleva (acentos, orden nombre/apellido).
 Documentado aqui para que quien construya src/pipeline/ lo tenga en
 cuenta desde el principio, no lo descubra con un join vacio.
 
-NextGen (ANGT): TRAINABLE_SOURCES incluye "nextgen" (ver base.py) y
-este modulo acepta competition="nextgen", pero list_teams()/list_games()
-lanzan EuroleagueSourceError para esa competicion -- el calendario v2
-solo documenta (y se ha verificado en vivo) competitionCode "E" y "U";
-no hay constancia de que "J"/"JT" funcione ahi, y NextGen no usa liga
-regular sino torneos + Final Four, lo que probablemente exige un
-endpoint distinto. get_boxscore()/get_shots() SI deberian funcionar
-para NextGen si se les da un game_id valido obtenido por otra via
-(los endpoints Boxscore/Points de live.euroleague.net estan
-documentados como validos para las tres competiciones) -- sin probar
-en vivo.
+NEXTGEN (ANGT) RESUELTO EN VIVO (2026-09-19) -- ya no lanza
+EuroleagueSourceError. Se investigo primero un documento externo
+subido por el usuario que proponia un rediseño de la interfaz (season
+simbolico "J2023"/"J2024" + parametro event/phase nuevo) -- verificado
+contra la API real, ESE PLANTEAMIENTO ERA INNECESARIO. Lo confirmado
+en vivo, con la misma cabecera Accept: application/json que usa este
+modulo (para descartar que fuese solo cosa del navegador):
+
+- competitionCode = "J" SI funciona en el calendario v2, exactamente
+  igual que "E"/"U" -- misma forma de respuesta JSON ({"data": [...]},
+  local/road/club.code/score, identifier="SEASONCODE_GAMECODE"),
+  mismo endpoint de plantilla (clubs/{code}/people, type=="J" filtra
+  jugadores igual), mismos Boxscore/Points de live.euroleague.net.
+  Cero cambios de mapeo de campos hicieron falta -- todo el codigo de
+  abajo (list_teams/list_games/list_players/get_boxscore/get_shots) es
+  el MISMO para las tres competiciones, solo cambia el diccionario
+  _COMPETITION_CODES.
+- LO QUE SI ES DISTINTO (y el documento subido acertaba en la idea de
+  fondo, aunque no en el formato del seasonCode): NextGen NO tiene un
+  "season" por año como E/U. Cada edicion anual son ~5 seasonCode
+  independientes, uno por sede clasificatoria mas uno para la Final
+  Eight (ej. temporada 2023-24 real, verificada via
+  /v2/competitions/J/seasons: JTC23 Podgorica, JTB23 Belgrado, JTD23
+  Dubai, JTP23 Paris, JTF423 Berlin Finals -- cada uno con su propio
+  `year`/fechas/ganador). No hay un codigo simbolico "J2023" que
+  funcione solo -- hay que pasar el codigo de sede real
+  (list_games(season="JTB23"), no season="J2023").
+  Para saber que codigos de sede existen para un año dado: GET
+  /v2/competitions/J/seasons (JSON {"data":[...], "total":N}) y
+  filtrar por el campo "year" de cada entrada -- no hay otra forma de
+  listarlos, no se puede adivinar el codigo de sede a partir del año.
+- get_shots() tambien confirmado en vivo para NextGen (partido real
+  JTB23_16, 186 filas en Points) -- y la calibracion de coordenadas es
+  la MISMA que euroleague/eurocup (ver src/features.py,
+  SHOT_COORD_CALIBRATION): las coordenadas observadas encajan con el
+  radio de 6.75m del arco de 3 FIBA multiplicado por 100, igual que en
+  Euroliga/EuroCup (mismo proveedor de datos por debajo).
+- Decision de diseño (instruccion del usuario, 2026-09-19): NextGen se
+  usa con codigo de sede directo, NO con un año simbolico que agregue
+  varias sedes automaticamente -- mas simple de implementar y evita
+  adivinar que sedes "cuentan" como la temporada de un año (algunas
+  ediciones han tenido mas o menos de 4 clasificatorios historicamente).
+  Por eso scripts/ingest_historical.py es la unica via soportada para
+  NextGen (una fuente + --seasons con codigos de sede reales,
+  explicitos) -- scripts/ingest_data.py lo rechaza (no hay "temporada
+  actual" de NextGen, ver su propio build_source()).
 
 PROBADO EN VIVO por el usuario en su propio equipo (temporadas E2024 y
 U2024, ya cerradas): los cinco metodos funcionan contra la API real,
@@ -69,14 +104,77 @@ en vivo, y ya no es una duda, que el endpoint de plantilla
 (`clubs/{code}/people`) funciona igual para EuroCup ("U") que para
 Euroliga ("E") -- se probo explicitamente el roster de un club de
 EuroCup (Dreamland Gran Canaria) y devolvio 18 jugadores tipo "J"
-correctamente. NextGen sigue sin probarse (list_teams()/list_games()
-lo rechazan explicitamente, ver aviso arriba).
+correctamente. NextGen probado en vivo por separado el 2026-09-19 (ver
+aviso "NEXTGEN (ANGT) RESUELTO EN VIVO" arriba) -- mismo resultado,
+cero diferencias de formato.
+
+RATE LIMIT REAL, CONFIRMADO EN VIVO (usuario, 2026-09-10) -- CORRIGE
+una suposicion anterior de decisiones_proyecto.md ("Euroliga/EuroCup
+no tienen ese limite forzado"): una ingesta historica de 5 temporadas
+(script/ingest_historical.py) hizo que tanto live.euroleague.net/api
+(Boxscore/Points) como api-live.euroleague.net/v2 (calendario)
+empezaran a devolver 429 Too Many Requests tras ~150-180 peticiones
+seguidas dentro de la misma sesion de ~40s -- y el bloqueo persistio
+para el resto de esa ejecucion, incluidas temporadas y competiciones
+(Euroliga Y EuroCup) totalmente distintas pedidas despues. No hay
+Crawl-delay documentado para euroleague.net (a diferencia del `Crawl-
+delay: 3` confirmado de basketball-reference.com, ver
+sports_reference.py) ni se ha medido en vivo el umbral real -- por eso
+este modulo NO forzaba ningun intervalo minimo entre peticiones al
+principio (ver "PACING AÑADIDO" mas abajo para el cambio posterior);
+lo que SI se corrigio aqui desde el principio es que un 429 real se
+distinga de cualquier otro fallo: `_get_json()` lanza `RateLimitedError`
+(la misma clase que sports_reference.py, importada de ahi -- es el
+contrato que ya usa src/pipeline/ingest.py para "parar todo, no tratar
+como un partido suelto que fallo") en vez de envolverlo en
+`EuroleagueSourceError` generico. Antes de este cambio, un 429 en
+pleno bucle de boxscores no paraba nada: `ingest.py` lo trataba como
+"este partido en concreto fallo" y seguia intentando los cientos de
+partidos restantes, cada uno con su propio 429 -- ver el caso real de
+E2025 (83 boxscores ok, 319 "fallidos" uno a uno, todos 429, en vez de
+abortar limpio tras el primero).
+
+PACING AÑADIDO (2026-09-11), instruccion del usuario -- tras el fix de
+arriba, el usuario reintento euroliga/eurocup TRES veces reales (ver
+decisiones_proyecto.md, entrada "EUROLIGA/EUROCUP RATE LIMIT REAL"):
+las tres chocaron con el bloqueo, pero cada una llego un poco mas lejos
+en E2025 antes de bloquear (75 -> 100 -> 125 boxscores ok), con la
+MISMA IP las tres veces y sin ninguna pausa entre peticiones (~150-180
+peticiones seguidas en ~40s, es decir, un ritmo de ~4 peticiones/
+segundo). Ese patron (mejora con el tiempo transcurrido, no con
+cambios de IP) apunta a un limite que se va regenerando -- tipo
+ventana deslizante -- mas que a un baneo fijo, aunque no hay
+confirmacion en vivo de la mecanica exacta. `_get_json()` ahora fuerza
+un intervalo minimo entre peticiones (mismo patron que
+`SportsReferenceSession.get()` en sports_reference.py: espera lo que
+haga falta antes de cada peticion, contando desde la peticion anterior
+de ESTA MISMA instancia). El valor, `_MIN_INTERVAL_SECONDS = 1.5`
+(~0.67 peticiones/segundo), sigue siendo una eleccion conservadora SIN
+verificar en vivo -- no hay Crawl-delay documentado para euroleague.net
+y el umbral real exacto se desconoce -- pero ya no es adivinar sin mas
+contexto (ver "no adivinar" en decisiones_proyecto.md): es mas de 5
+veces mas lento que el ritmo real (~4/s) que disparo el bloqueo en los
+3 intentos sin pausa.
+
+VALIDADO EN VIVO (2026-09-20) -- el usuario reintento
+`ingest_historical.py --sources euroleague,eurocup` (las 8
+combinaciones (fuente, temporada) por defecto, incluida E2025, la
+misma temporada que bloqueo las tres veces anteriores) y confirmo que
+la ingesta completo con exito, sin ningun 429. El pacing de
+`_MIN_INTERVAL_SECONDS = 1.5` por si solo basta para evitar el
+bloqueo -- ya no hace falta esperar tiempo adicional entre intentos
+(no se cumplio la hipotesis de ventana temporal que habria exigido
+mas que pacing). PENDIENTE (menor, no bloqueante): no se ha medido si
+un intervalo mas corto que 1.5s tambien evitaria el bloqueo -- 1.5s
+sigue siendo una eleccion conservadora, solo confirmada como
+suficiente, no como el minimo real.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+import time
 
 import requests
 
@@ -89,6 +187,16 @@ from src.scraper.base import (
     Team,
     TeamStatLine,
 )
+# Misma clase que usa sports_reference.py (CBB/WNBA) -- src/pipeline/
+# ingest.py la importa de ahi como el contrato de "parar todo, no
+# reintentar" (ver docstring de ingest.py); reutilizarla aqui es lo que
+# hace que un 429 real de euroleague.net dispare exactamente ese mismo
+# comportamiento en vez de cualquier otro fallo generico. El nombre
+# "SportsReferenceError" como clase base es un poco confuso fuera de
+# ese modulo, pero mover la excepcion a un sitio mas neutral tocaria
+# tambien sports_reference.py e ingest.py -- se deja como posible
+# limpieza futura, no parte de este fix (ver decisiones_proyecto.md).
+from src.scraper.sports_reference import RateLimitedError
 
 logger = logging.getLogger(__name__)
 
@@ -106,22 +214,36 @@ _HEADERS = {
 
 _DEFAULT_TIMEOUT = 30
 
-# competitionCode de la API v2, solo para las competiciones donde el
-# calendario v2 esta confirmado en vivo (ver aviso de NextGen arriba).
+# Intervalo minimo entre peticiones -- ver docstring del modulo,
+# seccion "PACING AÑADIDO (2026-09-11)": valor conservador SIN
+# verificar en vivo (no hay Crawl-delay documentado para
+# euroleague.net), elegido para quedar bastante por debajo del ritmo
+# real (~4 peticiones/segundo, sin pausa) que disparo el bloqueo en
+# los 3 intentos reales del usuario.
+_MIN_INTERVAL_SECONDS = 1.5
+
+# competitionCode de la API v2, para las tres competiciones -- las tres
+# confirmadas en vivo (ver aviso "NEXTGEN (ANGT) RESUELTO EN VIVO" mas
+# arriba para el caso de NextGen, resuelto el 2026-09-19).
 _COMPETITION_CODES = {
     "euroleague": "E",
     "eurocup": "U",
+    "nextgen": "J",
 }
 
-# Prefijo de seasoncode esperado por competicion (ver plano, seccion 05
-# -- tabla "Prefijo de seasoncode por competicion, resuelto"). Se usa
-# solo como aviso temprano si alguien pasa un season con el prefijo
-# equivocado; NextGen tiene mas de un prefijo valido (J/JT/JTM/JTV) asi
-# que no se valida de forma estricta.
+# Prefijo de seasoncode esperado por competicion. Se usa solo como aviso
+# temprano si alguien pasa un season con el prefijo equivocado; NextGen
+# tiene bastantes mas variantes reales que "J" a secas (ver
+# /v2/competitions/J/seasons, verificado en vivo 2026-09-19: JTB##
+# Belgrado, JTC## Podgorica, JTD## Dubai, JTP## Paris, JTF4## Final
+# Eight, y para años mas antiguos JT##/J####) -- en vez de listarlas
+# todas (fragil si la API añade una sede nueva), basta con "J" solo:
+# cubre a todas por prefijo comun y sigue rechazando un season que no
+# sea de NextGen en absoluto.
 _SEASON_PREFIXES = {
     "euroleague": ("E",),
     "eurocup": ("U",),
-    "nextgen": ("J", "JT", "JTM", "JTV"),
+    "nextgen": ("J",),
 }
 
 _SHOT_ACTIONS = {"2FGA", "2FGM", "3FGA", "3FGM"}
@@ -172,12 +294,44 @@ class EuroleagueSource:
         self.season = season  # usado por list_players(), que no recibe season
         self._session = requests.Session()
         self._session.headers.update(_HEADERS)
+        # Pacing entre peticiones (ver docstring del modulo, "PACING
+        # AÑADIDO") -- por instancia, igual que SportsReferenceSession:
+        # si se crean varias instancias no comparten el contador, asi
+        # que una ingesta que use varias EuroleagueSource en paralelo
+        # NO estaria realmente espaciando sus peticiones entre si.
+        self._last_request_at: float | None = None
 
     # -- infraestructura HTTP ---------------------------------------------
 
     def _get_json(self, url: str, params: dict, context: str) -> dict:
+        if self._last_request_at is not None:
+            elapsed = time.monotonic() - self._last_request_at
+            wait = _MIN_INTERVAL_SECONDS - elapsed
+            if wait > 0:
+                time.sleep(wait)
+
         try:
             response = self._session.get(url, params=params, timeout=_DEFAULT_TIMEOUT)
+        except requests.RequestException as exc:
+            self._last_request_at = time.monotonic()
+            raise EuroleagueSourceError(f"Fallo pidiendo {context}: {exc}") from exc
+        self._last_request_at = time.monotonic()
+
+        # 429 se comprueba ANTES de raise_for_status() y por separado del
+        # resto de errores HTTP -- ver aviso en el docstring del modulo
+        # (2026-09-10): un 429 real de euroleague.net debe parar la
+        # ingesta entera (RateLimitedError), no tratarse como el fallo de
+        # un partido/temporada concreto que se avisa y se salta.
+        if response.status_code == 429:
+            raise RateLimitedError(
+                f"429 Too Many Requests pidiendo {context} "
+                f"({response.url}) -- posible bloqueo temporal de "
+                f"IP/sesion en euroleague.net (ver docstring de "
+                f"euroleague.py). PARAR el proceso por completo, no "
+                f"reintentar de inmediato."
+            )
+
+        try:
             response.raise_for_status()
             return response.json()
         except (requests.RequestException, ValueError) as exc:
