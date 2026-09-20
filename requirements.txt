@@ -1,5 +1,6 @@
 # --- Scraping ---
 requests
+curl_cffi  # necesario para CBB (sports-reference.com): requests normal recibe 403, hace falta imitar la huella TLS de un navegador real
 httpx
 beautifulsoup4
 lxml
