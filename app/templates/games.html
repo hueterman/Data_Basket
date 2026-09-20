@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Partidos{% endblock %}
+{% block content %}
+  <h1>Partidos</h1>
+  <p class="subtitle">{{ "{:,}".format(total) }} resultado(s) · página {{ page }} de {{ pages }}</p>
+
+  <form class="filters" method="get">
+    <select name="source" onchange="this.form.submit()">
+      <option value="">Todas las fuentes</option>
+      {% for s in sources %}
+        <option value="{{ s }}" {{ "selected" if s == source }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    {% if source %}
+    <select name="season" onchange="this.form.submit()">
+      <option value="">Todas las temporadas</option>
+      {% for s in seasons %}
+        <option value="{{ s }}" {{ "selected" if s == season }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+    <button type="submit">Filtrar</button>
+    {% if source or season %}<a class="clear" href="{{ url_for('games') }}">limpiar</a>{% endif %}
+  </form>
+
+  {% if games %}
+  <div class="panel">
+    <table>
+      <thead><tr><th>Fecha</th><th>Fuente</th><th>Temporada</th><th>Local</th><th>Visitante</th><th>Resultado</th></tr></thead>
+      <tbody>
+        {% for g in games %}
+        <tr>
+          <td>{{ g.date or "—" }}</td>
+          <td>{{ g.source }}</td>
+          <td>{{ g.season }}</td>
+          <td>{{ team_names.get((g.source, g.home_team_id), g.home_team_id) }}</td>
+          <td>{{ team_names.get((g.source, g.away_team_id), g.away_team_id) }}</td>
+          <td>
+            {% if g.played and g.home_score is not none and g.away_score is not none %}
+              <a href="{{ url_for('game_detail', source=g.source, game_id=g.game_id) }}">{{ g.home_score }}–{{ g.away_score }}</a>
+            {% else %}
+              <span class="not-played">sin jugar</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    {% if page > 1 %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'season=' + season + '&' if season }}page={{ page - 1 }}">← anterior</a>{% endif %}
+    <span>página {{ page }} / {{ pages }}</span>
+    {% if page < pages %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'season=' + season + '&' if season }}page={{ page + 1 }}">siguiente →</a>{% endif %}
+  </div>
+  {% else %}
+    <p class="empty">Sin resultados para este filtro.</p>
+  {% endif %}
+{% endblock %}

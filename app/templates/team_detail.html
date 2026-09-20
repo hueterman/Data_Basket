@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}{{ team.name }}{% endblock %}
+{% block content %}
+  <a class="back-link" href="{{ url_for('teams', source=team.source) }}">← Equipos ({{ team.source }})</a>
+  <h1>{{ team.name }}</h1>
+  <p class="subtitle">{{ team.source }} · id {{ team.team_id }}</p>
+
+  <div class="stat-grid">
+    <div class="stat-tile"><div class="n">{{ wins }}-{{ losses }}</div><div class="label">Balance (partidos jugados)</div></div>
+    <div class="stat-tile"><div class="n">{{ games|length }}</div><div class="label">Partidos en la base de datos</div></div>
+    <div class="stat-tile"><div class="n">{{ roster|length }}</div><div class="label">Plantilla (última vista)</div></div>
+  </div>
+
+  <h2>Plantilla</h2>
+  <p class="subtitle">Último equipo visto en list_players() — para saber en qué equipo jugó un partido concreto, mirar ese partido, no esta lista.</p>
+  {% if roster %}
+  <div class="panel">
+    <table>
+      <thead><tr><th>Jugador/a</th></tr></thead>
+      <tbody>
+        {% for p in roster %}
+        <tr><td><a href="{{ url_for('player_detail', source=team.source, player_id=p.player_id) }}">{{ p.name }}</a></td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty">Sin plantilla guardada para este equipo.</p>
+  {% endif %}
+
+  <h2>Partidos</h2>
+  {% if games %}
+  <div class="panel">
+    <table>
+      <thead><tr><th>Fecha</th><th>Temporada</th><th>Rival</th><th>Resultado</th></tr></thead>
+      <tbody>
+        {% for g in games %}
+        {% set is_home = g.home_team_id == team.team_id %}
+        {% set opp_id = g.away_team_id if is_home else g.home_team_id %}
+        {% set own = g.home_score if is_home else g.away_score %}
+        {% set opp = g.away_score if is_home else g.home_score %}
+        <tr>
+          <td>{{ g.date or "—" }}</td>
+          <td>{{ g.season }}</td>
+          <td>{{ "vs " if is_home else "@ " }}{{ opponent_names.get(opp_id, opp_id) }}</td>
+          <td>
+            {% if g.played and own is not none and opp is not none %}
+              <a href="{{ url_for('game_detail', source=team.source, game_id=g.game_id) }}">
+                <span class="{{ 'win' if own > opp else 'loss' }}">{{ own }}–{{ opp }}</span>
+              </a>
+            {% else %}
+              <span class="not-played">sin jugar</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty">Sin partidos guardados para este equipo.</p>
+  {% endif %}
+
+  {% if attribution %}<p class="attribution">{{ attribution }}</p>{% endif %}
+{% endblock %}

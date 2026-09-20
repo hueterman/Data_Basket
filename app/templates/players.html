@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Jugadores{% endblock %}
+{% block content %}
+  <h1>Jugadores/as</h1>
+  <p class="subtitle">{{ "{:,}".format(total) }} resultado(s) · página {{ page }} de {{ pages }}</p>
+
+  <form class="filters" method="get">
+    <select name="source" onchange="this.form.submit()">
+      <option value="">Todas las fuentes</option>
+      {% for s in sources %}
+        <option value="{{ s }}" {{ "selected" if s == source }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="q" placeholder="Buscar por nombre…" value="{{ q }}">
+    <button type="submit">Filtrar</button>
+    {% if source or q %}<a class="clear" href="{{ url_for('players') }}">limpiar</a>{% endif %}
+  </form>
+
+  {% if players %}
+  <div class="panel">
+    <table>
+      <thead><tr><th>Fuente</th><th>Jugador/a</th><th>Último equipo</th></tr></thead>
+      <tbody>
+        {% for p in players %}
+        <tr>
+          <td>{{ p.source }}</td>
+          <td><a href="{{ url_for('player_detail', source=p.source, player_id=p.player_id) }}">{{ p.name }}</a></td>
+          <td><a href="{{ url_for('team_detail', source=p.source, team_id=p.team_id) }}">{{ p.team_id }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    {% if page > 1 %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'q=' + q + '&' if q }}page={{ page - 1 }}">← anterior</a>{% endif %}
+    <span>página {{ page }} / {{ pages }}</span>
+    {% if page < pages %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'q=' + q + '&' if q }}page={{ page + 1 }}">siguiente →</a>{% endif %}
+  </div>
+  {% else %}
+    <p class="empty">Sin resultados para este filtro.</p>
+  {% endif %}
+{% endblock %}

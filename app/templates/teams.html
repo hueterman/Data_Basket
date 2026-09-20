@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Equipos{% endblock %}
+{% block content %}
+  <h1>Equipos</h1>
+  <p class="subtitle">{{ teams|length }} resultado(s)</p>
+
+  <form class="filters" method="get">
+    <select name="source" onchange="this.form.submit()">
+      <option value="">Todas las fuentes</option>
+      {% for s in sources %}
+        <option value="{{ s }}" {{ "selected" if s == source }}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="q" placeholder="Buscar por nombre…" value="{{ q }}">
+    <button type="submit">Filtrar</button>
+    {% if source or q %}<a class="clear" href="{{ url_for('teams') }}">limpiar</a>{% endif %}
+  </form>
+
+  {% if teams %}
+  <div class="panel">
+    <table>
+      <thead><tr><th>Fuente</th><th>Equipo</th></tr></thead>
+      <tbody>
+        {% for t in teams %}
+        <tr>
+          <td>{{ t.source }}</td>
+          <td><a href="{{ url_for('team_detail', source=t.source, team_id=t.team_id) }}">{{ t.name }}</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty">Sin resultados para este filtro.</p>
+  {% endif %}
+{% endblock %}

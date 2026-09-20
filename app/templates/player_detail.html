@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ player.name }}{% endblock %}
+{% block content %}
+  <a class="back-link" href="{{ url_for('players', source=player.source) }}">← Jugadores ({{ player.source }})</a>
+  <h1>{{ player.name }}</h1>
+  <p class="subtitle">{{ player.source }} · id {{ player.player_id }} · último equipo:
+    <a href="{{ url_for('team_detail', source=player.source, team_id=player.team_id) }}">{{ player.team_id }}</a>
+  </p>
+
+  <div class="stat-grid">
+    <div class="stat-tile"><div class="n">{{ n }}</div><div class="label">Partidos con boxscore</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.points if averages.points is not none else "—" }}</div><div class="label">Puntos / partido</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.rebounds if averages.rebounds is not none else "—" }}</div><div class="label">Rebotes / partido</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.assists if averages.assists is not none else "—" }}</div><div class="label">Asistencias / partido</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.val if averages.val is not none else "—" }}</div><div class="label">Valoración / partido</div></div>
+  </div>
+
+  <h2>Partido a partido</h2>
+  {% if stat_lines %}
+  <div class="panel">
+    <table>
+      <thead>
+        <tr><th>Fecha</th><th>Temporada</th><th>Equipo</th><th>Min</th><th>Pts</th><th>Reb</th><th>Ast</th><th>Val</th><th>+/-</th></tr>
+      </thead>
+      <tbody>
+        {% for r in stat_lines %}
+        <tr>
+          <td><a href="{{ url_for('game_detail', source=player.source, game_id=r.game_id) }}">{{ r.date or r.game_id }}</a></td>
+          <td>{{ r.season }}</td>
+          <td>{{ r.team_id }}</td>
+          <td>{{ r.minutes if r.minutes is not none else "—" }}</td>
+          <td>{{ r.points if r.points is not none else "—" }}</td>
+          <td>{{ r.rebounds if r.rebounds is not none else "—" }}</td>
+          <td>{{ r.assists if r.assists is not none else "—" }}</td>
+          <td>{{ r.val if r.val is not none else "—" }}</td>
+          <td>{{ r.plus_minus if r.plus_minus is not none else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty">Sin líneas de boxscore guardadas para este jugador.</p>
+  {% endif %}
+
+  {% if attribution %}<p class="attribution">{{ attribution }}</p>{% endif %}
+{% endblock %}

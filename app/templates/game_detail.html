@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}{{ team_names.get(game.home_team_id, game.home_team_id) }} - {{ team_names.get(game.away_team_id, game.away_team_id) }}{% endblock %}
+{% block content %}
+  <a class="back-link" href="{{ url_for('games', source=game.source) }}">← Partidos ({{ game.source }})</a>
+
+  <h1>
+    {{ team_names.get(game.home_team_id, game.home_team_id) }}
+    {% if game.played and game.home_score is not none %}
+      {{ game.home_score }}–{{ game.away_score }}
+    {% else %}
+      vs
+    {% endif %}
+    {{ team_names.get(game.away_team_id, game.away_team_id) }}
+  </h1>
+  <p class="subtitle">{{ game.source }} · temporada {{ game.season }} · {{ game.date or "fecha desconocida" }}{% if game.round %} · jornada {{ game.round }}{% endif %} · id {{ game.game_id }}</p>
+
+  {% if not game.played %}
+    <p class="empty">Este partido todavía no se ha jugado (o no hay marcador guardado).</p>
+  {% endif %}
+
+  {% if team_stats %}
+  <h2>Estadísticas de equipo</h2>
+  <div class="panel">
+    <table>
+      <thead>
+        <tr><th>Equipo</th><th>T2</th><th>T3</th><th>TL</th><th>Reb O</th><th>Reb D</th><th>Ast</th><th>Rec</th><th>Pér</th><th>Tap</th><th>Fp</th><th>Val</th></tr>
+      </thead>
+      <tbody>
+        {% for t in team_stats %}
+        <tr>
+          <td><a href="{{ url_for('team_detail', source=game.source, team_id=t.team_id) }}">{{ team_names.get(t.team_id, t.team_id) }}</a></td>
+          <td>{{ t.t2_made }}/{{ t.t2_att }}</td>
+          <td>{{ t.t3_made }}/{{ t.t3_att }}</td>
+          <td>{{ t.ft_made }}/{{ t.ft_att }}</td>
+          <td>{{ t.reb_off if t.reb_off is not none else "—" }}</td>
+          <td>{{ t.reb_def if t.reb_def is not none else "—" }}</td>
+          <td>{{ t.ast if t.ast is not none else "—" }}</td>
+          <td>{{ t.stl if t.stl is not none else "—" }}</td>
+          <td>{{ t.turnovers if t.turnovers is not none else "—" }}</td>
+          <td>{{ t.blocks if t.blocks is not none else "—" }}</td>
+          <td>{{ t.fouls if t.fouls is not none else "—" }}</td>
+          <td>{{ t.val if t.val is not none else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if player_stats %}
+  <h2>Boxscore individual</h2>
+  <div class="panel">
+    <table>
+      <thead><tr><th>Jugador/a</th><th>Equipo</th><th>Min</th><th>Pts</th><th>Reb</th><th>Ast</th><th>Val</th><th>+/-</th></tr></thead>
+      <tbody>
+        {% for p in player_stats %}
+        <tr>
+          <td><a href="{{ url_for('player_detail', source=game.source, player_id=p.player_id) }}">{{ p.player_name }}</a></td>
+          <td>{{ team_names.get(p.team_id, p.team_id) }}</td>
+          <td>{{ p.minutes if p.minutes is not none else "—" }}</td>
+          <td>{{ p.points if p.points is not none else "—" }}</td>
+          <td>{{ p.rebounds if p.rebounds is not none else "—" }}</td>
+          <td>{{ p.assists if p.assists is not none else "—" }}</td>
+          <td>{{ p.val if p.val is not none else "—" }}</td>
+          <td>{{ p.plus_minus if p.plus_minus is not none else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <h2>Tiros</h2>
+  {% if has_shot_chart %}
+    <div class="panel shot-chart">
+      <img src="{{ url_for('shot_chart', source=game.source, game_id=game.game_id) }}" alt="Shot chart del partido">
+      <p class="subtitle" style="margin-top:8px;">{{ "{:,}".format(n_shots) }} tiros con coordenadas guardadas. Pista simplificada (no es el trazado oficial completo, ver src/viz/courts.py).</p>
+    </div>
+  {% elif n_shots > 0 %}
+    <p class="empty">{{ n_shots }} tiros guardados, pero {{ game.source }} todavía no tiene calibración de coordenadas para dibujar el gráfico.</p>
+  {% else %}
+    <p class="empty">Sin tiros con coordenadas guardados para este partido{% if game.source in ("acb", "cbb") %} ({{ game.source }} no tiene esta información disponible en la fuente){% endif %}.</p>
+  {% endif %}
+
+  {% if attribution %}<p class="attribution">{{ attribution }}</p>{% endif %}
+{% endblock %}

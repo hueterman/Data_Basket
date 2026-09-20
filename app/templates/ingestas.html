@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Ingestas{% endblock %}
+{% block content %}
+  <h1>Ingestas</h1>
+  <p class="subtitle">Lanza y vigila <code>scripts/ingest_data.py</code> / <code>scripts/ingest_historical.py</code> desde aquí. Solo una ingesta a la vez.</p>
+
+  <div id="job-panel" class="panel" hidden>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div>
+        <span id="job-badge" class="badge badge-running">en marcha</span>
+        <strong id="job-desc" style="margin-left:8px;"></strong>
+      </div>
+      <div>
+        <span id="job-elapsed" class="hint"></span>
+        <form id="stop-form" method="post" action="{{ url_for('detener_ingesta') }}" style="display:inline; margin-left:10px;">
+          <button type="submit" class="btn-danger" id="stop-btn">Detener</button>
+        </form>
+      </div>
+    </div>
+    <p class="hint" id="job-cmd" style="margin-top:8px;"></p>
+    <div class="log-box" id="job-log"></div>
+    <p class="hint" style="margin-top:8px;">Detener es seguro: las ingestas son reanudables (cachean cada respuesta antes de guardarla) — cortar a mitad no corrompe nada, solo se retoma más tarde donde se quedó.</p>
+  </div>
+
+  <div id="launch-forms">
+    <fieldset>
+      <legend>Ingesta simple (temporada actual de cada fuente)</legend>
+      <form method="post" action="{{ url_for('lanzar_simple') }}">
+        <div class="checkbox-row">
+          {% for s in simple_sources %}
+            <label>
+              <input type="checkbox" name="sources" value="{{ s }}" {{ "checked" if s in ("nba","wnba","euroleague","eurocup") }}>
+              {{ s }}
+              {% if s in rate_limited_sources %}<span class="hint" title="Ya se ha chocado con un límite de peticiones real en esta fuente">⚠️</span>{% endif %}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="field-row">
+          <label for="limit-simple">Límite de partidos (opcional, por fuente):</label>
+          <input type="number" id="limit-simple" name="limit" min="1" placeholder="sin límite">
+          <label><input type="checkbox" name="no_players"> sin plantillas (más rápido)</label>
+        </div>
+        <p class="hint">CBB sin límite tarda varias horas (miles de partidos a ritmo controlado). FEB/ACB: temporada 2026-27, puede que aún sin partidos jugados.</p>
+        <button type="submit">Lanzar ingesta simple</button>
+      </form>
+    </fieldset>
+
+    <fieldset>
+      <legend>Ingesta histórica (temporadas pasadas)</legend>
+      <form method="post" action="{{ url_for('lanzar_historica') }}">
+        <div class="checkbox-row">
+          {% for s in historical_sources %}
+            <label>
+              <input type="checkbox" name="sources" value="{{ s }}" {{ "checked" if s in ("nba","euroleague","eurocup","acb") }}>
+              {{ s }}
+              {% if s in rate_limited_sources %}<span class="hint" title="Ya se ha chocado con un límite de peticiones real en esta fuente">⚠️</span>{% endif %}
+              {% if s in historical_default_seasons %}
+                <span class="hint">({{ historical_default_seasons[s]|join(", ") }})</span>
+              {% endif %}
+            </label>
+          {% endfor %}
+        </div>
+        <div class="field-row">
+          <label for="seasons">Temporadas personalizadas (opcional, solo con UNA fuente marcada):</label>
+          <input type="text" id="seasons" name="seasons" placeholder="p. ej. 2020-21,2019-20">
+        </div>
+        <div class="field-row">
+          <label for="limit-hist">Límite de partidos (opcional, por temporada):</label>
+          <input type="number" id="limit-hist" name="limit" min="1" placeholder="sin límite">
+          <label><input type="checkbox" name="no_players"> sin plantillas (más rápido)</label>
+        </div>
+        <p class="hint">wnba/cbb no tienen temporadas por defecto aquí — hay que indicarlas a mano, con una única fuente marcada.</p>
+        <p class="hint">nextgen (ANGT) siempre necesita temporadas personalizadas: no son años, son códigos de sede reales (ej. <code>JTB23</code> = Belgrado 2023-24; una edición anual completa son ~5 códigos — ver <code>scripts/ingest_historical.py</code> para cómo encontrarlos).</p>
+        <button type="submit">Lanzar ingesta histórica</button>
+      </form>
+    </fieldset>
+  </div>
+
+  <h2 id="historial">Historial de ingestas</h2>
+  <p class="subtitle">{{ "{:,}".format(total_logs) }} etapa(s) registrada(s) en total · página {{ log_page }} de {{ log_pages }}</p>
+  {% if logs %}
+  <div class="panel">
+    <table>
+      <thead><tr><th>Fuente</th><th>Temporada</th><th>Etapa</th><th>Inicio</th><th>Fin</th><th>Items</th><th>Errores</th></tr></thead>
+      <tbody>
+        {% for l in logs %}
+        <tr>
+          <td>{{ l.source }}</td>
+          <td>{{ l.season }}</td>
+          <td>{{ l.stage }}</td>
+          <td>{{ l.started_at[:19] if l.started_at else "—" }}</td>
+          <td>{{ l.finished_at[:19] if l.finished_at else "—" }}</td>
+          <td>{{ l.n_items if l.n_items is not none else "—" }}</td>
+          <td>{{ l.n_errors if l.n_errors else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    {% if log_page > 1 %}<a href="?log_page={{ log_page - 1 }}#historial">← más recientes</a>{% endif %}
+    <span>página {{ log_page }} / {{ log_pages }}</span>
+    {% if log_page < log_pages %}<a href="?log_page={{ log_page + 1 }}#historial">más antiguas →</a>{% endif %}
+  </div>
+  {% else %}
+    <p class="empty">Sin ingestas registradas todavía.</p>
+  {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const panel = document.getElementById("job-panel");
+  const forms = document.getElementById("launch-forms");
+  const badge = document.getElementById("job-badge");
+  const desc = document.getElementById("job-desc");
+  const cmd = document.getElementById("job-cmd");
+  const elapsed = document.getElementById("job-elapsed");
+  const logBox = document.getElementById("job-log");
+
+  function fmtElapsed(s) {
+    if (s == null) return "";
+    s = Math.floor(s);
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+    return (h ? h + "h " : "") + (m ? m + "m " : "") + sec + "s";
+  }
+
+  function poll() {
+    fetch("{{ url_for('ingestas_estado') }}")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data.started) {
+          panel.hidden = true;
+          forms.hidden = false;
+          return;
+        }
+        panel.hidden = false;
+        forms.hidden = data.running;
+
+        if (data.running) {
+          badge.textContent = "en marcha";
+          badge.className = "badge badge-running";
+        } else if (data.returncode === 0) {
+          badge.textContent = "terminada (ok)";
+          badge.className = "badge badge-idle";
+        } else {
+          badge.textContent = "terminada (código " + data.returncode + ")";
+          badge.className = "badge badge-error";
+        }
+        desc.textContent = data.desc || "";
+        cmd.textContent = data.cmd || "";
+        elapsed.textContent = fmtElapsed(data.elapsed_seconds);
+
+        const wasAtBottom = logBox.scrollTop + logBox.clientHeight >= logBox.scrollHeight - 20;
+        logBox.textContent = data.log_tail || "";
+        if (wasAtBottom) logBox.scrollTop = logBox.scrollHeight;
+      })
+      .catch(() => {});
+  }
+
+  poll();
+  setInterval(poll, 2000);
+})();
+</script>
+{% endblock %}
