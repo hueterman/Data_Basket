@@ -34,7 +34,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import joblib
 import numpy as np
+import pandas as pd
+from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from src.pipeline.db import get_connection
 from src.pipeline.repository import upsert_games, upsert_teams, upsert_boxscore
@@ -181,6 +185,79 @@ def test_mechanics() -> None:
     print("  Mecanica: todo OK.\n")
 
 
+def fit_dummy_shot_model():
+    """Modelo de mentira para P(made) -- mismo tipo de pipeline que
+    train_shot.py (ColumnTransformer con StandardScaler + OneHotEncoder,
+    LogisticRegression encima) para que predict_proba() acepte
+    exactamente las mismas columnas/tipos que el real, sin depender de
+    haber entrenado nada de verdad."""
+    rng = np.random.default_rng(1)
+    n = 60
+    X = pd.DataFrame({
+        "dist_m": rng.uniform(0, 8, n),
+        "angle_deg": rng.uniform(0, 90, n),
+        "zone": rng.choice(["aro", "media_larga", "triple_arco"], n),
+        "shot_type": rng.choice(["2", "3"], n),
+        "source": rng.choice(["nba", "euroleague"], n),
+    })
+    y = (X["dist_m"] < 3).astype(int).to_numpy()
+    pipe = Pipeline([
+        ("pre", ColumnTransformer([
+            ("num", StandardScaler(), ["dist_m", "angle_deg"]),
+            ("cat", OneHotEncoder(handle_unknown="ignore"), ["zone", "shot_type", "source"]),
+        ])),
+        ("clf", LogisticRegression()),
+    ])
+    pipe.fit(X, y)
+    return pipe
+
+
+def test_shot_mechanics() -> None:
+    print("=== 1b) Mecanica del modelo de TIRO (datos/modelo sinteticos) ===")
+    import src.predict as predict_mod
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="test_api_shot_"))
+    predict_mod.MODELS_DIR = tmp_dir
+    predict_mod._SHOT_MODEL_FILES = {
+        "logreg": tmp_dir / "shot_make_logreg.joblib",
+        "xgboost": tmp_dir / "shot_make_xgb.joblib",
+    }
+    predict_mod._shot_model_cache.clear()
+    model = fit_dummy_shot_model()
+    joblib.dump(model, predict_mod._SHOT_MODEL_FILES["logreg"])
+    joblib.dump(model, predict_mod._SHOT_MODEL_FILES["xgboost"])
+    # Metadata de mentira -- limita "sources" a nba/euroleague, para
+    # poder probar el rechazo de una fuente calibrada pero NO entrenada
+    # (eurocup SI esta calibrada en SHOT_COORD_CALIBRATION pero no
+    # aparece aqui a proposito).
+    import json
+    with open(tmp_dir / "shot_make_metadata.json", "w", encoding="utf-8") as f:
+        json.dump({"sources": ["nba", "euroleague"]}, f)
+
+    result = predict_mod.shot_make_probability(
+        source="nba", x_m=0.5, y_m=1.0, shot_type="2", model_name="logreg",
+    )
+    print(f"  shot_make_probability(nba, cerca del aro, tiro de 2): {result}")
+    assert result["zone"] == "aro", f"(0.5, 1.0) deberia clasificar como 'aro', salio {result['zone']!r}"
+    assert 0.0 <= result["make_probability"] <= 1.0
+
+    for label, fn in [
+        ("fuente sin calibrar (acb)",
+         lambda: predict_mod.shot_make_probability("acb", 1.0, 1.0, "2")),
+        ("shot_type invalido",
+         lambda: predict_mod.shot_make_probability("nba", 1.0, 1.0, "libre")),
+        ("fuente calibrada pero no entrenada (eurocup)",
+         lambda: predict_mod.shot_make_probability("eurocup", 1.0, 1.0, "2", model_name="logreg")),
+    ]:
+        try:
+            fn()
+            raise AssertionError(f"  ERROR: {label!r} deberia haber lanzado PredictionError")
+        except predict_mod.PredictionError as exc:
+            print(f"  OK, error esperado ({label}): {exc}")
+
+    print("  Mecanica de tiro: todo OK.\n")
+
+
 def test_real_api_if_available() -> None:
     print("=== 2) Integracion real (API + modelos reales de train.py, si existen) ===")
     import src.predict as predict_mod
@@ -244,10 +321,44 @@ def test_real_api_if_available() -> None:
     print(f"  POST /predict (sin away_team_id) -> {r.status_code} {r.get_json()}")
     assert r.status_code == 400
 
+    if predict_mod.available_shot_models():
+        r = client.get("/model/info/shot")
+        shot_info = r.get_json()
+        print(f"  GET /model/info/shot -> {r.status_code} available_models="
+              f"{shot_info.get('available_models')} sources={shot_info.get('sources')} "
+              f"xgboost.accuracy={shot_info.get('metrics', {}).get('xgboost', {}).get('accuracy')}")
+        assert r.status_code == 200
+
+        r_rim = client.post("/predict_shot", json={
+            "source": "nba", "x_m": 0.3, "y_m": 0.5, "shot_type": "2",
+        })
+        r_three = client.post("/predict_shot", json={
+            "source": "nba", "x_m": 0.5, "y_m": 7.5, "shot_type": "3",
+        })
+        print(f"  POST /predict_shot (nba, tiro junto al aro) -> {r_rim.status_code} {r_rim.get_json()}")
+        print(f"  POST /predict_shot (nba, triple de arco) -> {r_three.status_code} {r_three.get_json()}")
+        assert r_rim.status_code == 200 and r_three.status_code == 200
+        p_rim = r_rim.get_json()["make_probability"]
+        p_three = r_three.get_json()["make_probability"]
+        assert p_rim > p_three, (
+            f"un tiro junto al aro deberia ser mas facil que un triple de arco "
+            f"(salio {p_rim} vs {p_three}) -- comprobacion de cordura basica"
+        )
+
+        r = client.post("/predict_shot", json={
+            "source": "feb", "x_m": 1.0, "y_m": 1.0, "shot_type": "2",
+        })
+        print(f"  POST /predict_shot (feb, sin calibrar) -> {r.status_code} {r.get_json()}")
+        assert r.status_code == 400
+    else:
+        print("  (sin modelo de tiro real en models/ todavia -- ejecuta 'python train_shot.py' "
+              "para probar /predict_shot. No es un fallo.)")
+
     print("  Integracion real: todo OK.\n")
 
 
 if __name__ == "__main__":
     test_mechanics()
+    test_shot_mechanics()
     test_real_api_if_available()
     print("Todas las pruebas pasaron.")

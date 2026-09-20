@@ -29,13 +29,14 @@ de las nueve, tanto en la regresion logistica como en XGBoost).
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from pathlib import Path
 
 import joblib
 import pandas as pd
 
-from src.features import build_team_game_features
+from src.features import SHOT_COORD_CALIBRATION, _classify_zone, build_team_game_features
 from src.features_pregame import ROLLING_STAT_COLS
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -51,8 +52,21 @@ _MODEL_FILES: dict[str, Path] = {
     "logreg": MODELS_DIR / "game_outcome_logreg.joblib",
     "xgboost": MODELS_DIR / "game_outcome_xgb.joblib",
 }
-
 _model_cache: dict[str, object] = {}
+
+# Segundo modelo (train_shot.py): P(made) de un tiro concreto -- mismas
+# columnas/orden que FEATURE_COLS alli (dist_m/angle_deg/zone/shot_type/
+# source). SOLO fuentes con coordenadas calibradas y verificadas en vivo
+# (ver SHOT_COORD_CALIBRATION en src/features.py y la nota "AMPLIACION
+# 2026-09-20" en train_shot.py sobre por que FEB queda fuera pese a
+# tener tiros reales guardados).
+SHOT_FEATURE_COLS: list[str] = ["dist_m", "angle_deg", "zone", "shot_type", "source"]
+
+_SHOT_MODEL_FILES: dict[str, Path] = {
+    "logreg": MODELS_DIR / "shot_make_logreg.joblib",
+    "xgboost": MODELS_DIR / "shot_make_xgb.joblib",
+}
+_shot_model_cache: dict[str, object] = {}
 
 DEFAULT_MIN_PRIOR_GAMES = 5  # igual que --min-prior-games por defecto en train.py
 
@@ -66,43 +80,71 @@ class PredictionError(ValueError):
     jugados todavia esta temporada)."""
 
 
+def _load_cached(cache: dict[str, object], name: str, files: dict[str, Path],
+                  train_script: str) -> object:
+    """Compartido por load_model()/load_shot_model() -- misma mecanica de
+    cache de proceso (ver docstring de load_model()) para los dos
+    modelos, cada uno con su propio diccionario de fichero/cache."""
+    if name not in files:
+        raise PredictionError(f"Modelo desconocido: {name!r}. Validos: {sorted(files)}")
+    if name not in cache:
+        path = files[name]
+        if not path.exists():
+            raise PredictionError(
+                f"No existe {path.name} todavia -- ejecuta '{train_script}' primero."
+            )
+        cache[name] = joblib.load(path)
+    return cache[name]
+
+
+def _load_metadata_file(filename: str, train_script: str) -> dict:
+    path = MODELS_DIR / filename
+    if not path.exists():
+        raise PredictionError(f"No existe {filename} todavia -- ejecuta '{train_script}' primero.")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 def available_models() -> list[str]:
-    """Nombres de modelo cuyo .joblib existe ya en MODELS_DIR (puede
-    estar vacio si no se ha ejecutado train.py todavia)."""
+    """Nombres de modelo de RESULTADO DE PARTIDO cuyo .joblib existe ya
+    en MODELS_DIR (puede estar vacio si no se ha ejecutado train.py
+    todavia)."""
     return [name for name, path in _MODEL_FILES.items() if path.exists()]
 
 
 def load_model(name: str):
-    """Carga (y cachea en memoria de proceso) un modelo por nombre.
-    Cache simple a proposito: la app la sirve un unico proceso Flask de
-    desarrollo (ver docstring de api/app.py), no hace falta nada mas
-    elaborado."""
-    if name not in _MODEL_FILES:
-        raise PredictionError(
-            f"Modelo desconocido: {name!r}. Validos: {sorted(_MODEL_FILES)}"
-        )
-    if name not in _model_cache:
-        path = _MODEL_FILES[name]
-        if not path.exists():
-            raise PredictionError(
-                f"No existe {path.name} todavia -- ejecuta 'python train.py' "
-                f"primero para entrenar y guardar los modelos."
-            )
-        _model_cache[name] = joblib.load(path)
-    return _model_cache[name]
+    """Carga (y cachea en memoria de proceso) un modelo de RESULTADO DE
+    PARTIDO por nombre. Cache simple a proposito: la app la sirve un
+    unico proceso Flask de desarrollo (ver docstring de api/app.py), no
+    hace falta nada mas elaborado."""
+    return _load_cached(_model_cache, name, _MODEL_FILES, "python train.py")
 
 
 def load_metadata() -> dict:
     """Contenido de models/game_outcome_metadata.json (metricas reales
     del ultimo entrenamiento) -- ver GET /model/info en api/app.py."""
-    path = MODELS_DIR / "game_outcome_metadata.json"
-    if not path.exists():
-        raise PredictionError(
-            "No existe game_outcome_metadata.json todavia -- ejecuta "
-            "'python train.py' primero."
-        )
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    return _load_metadata_file("game_outcome_metadata.json", "python train.py")
+
+
+def available_shot_models() -> list[str]:
+    """Nombres de modelo de PROBABILIDAD DE TIRO cuyo .joblib existe ya
+    (puede estar vacio si no se ha ejecutado train_shot.py todavia)."""
+    return [name for name, path in _SHOT_MODEL_FILES.items() if path.exists()]
+
+
+def load_shot_model(name: str):
+    """Carga (y cachea) un modelo de PROBABILIDAD DE TIRO por nombre --
+    ver load_model() para el criterio de cache."""
+    return _load_cached(_shot_model_cache, name, _SHOT_MODEL_FILES, "python train_shot.py")
+
+
+def load_shot_metadata() -> dict:
+    """Contenido de models/shot_make_metadata.json -- incluye "sources"
+    (las fuentes con las que se entreno de verdad), usado por
+    shot_make_probability() para rechazar una fuente que el modelo
+    nunca vio en vez de dejar que OneHotEncoder(handle_unknown="ignore")
+    la ignore en silencio."""
+    return _load_metadata_file("shot_make_metadata.json", "python train_shot.py")
 
 
 def latest_team_features(conn: sqlite3.Connection, source: str, team_id: str) -> dict:
@@ -198,4 +240,81 @@ def predict_game(
         "home_games_played": home["n_games"],
         "away_games_played": away["n_games"],
         "warnings": warnings,
+    }
+
+
+def shot_make_probability(
+    source: str,
+    x_m: float,
+    y_m: float,
+    shot_type: str,
+    model_name: str = "xgboost",
+) -> dict:
+    """P(made) de un tiro HIPOTETICO, con el modelo de train_shot.py.
+
+    x_m/y_m: coordenadas en METROS con origen en el aro -- misma
+    convencion que loc_x_m/loc_y_m en build_shot_features() (src/
+    features.py), NO las unidades nativas que guarda cada scraper en la
+    tabla `shots` (decimas de pie en NBA, centimetros en Euroliga/
+    EuroCup...) -- quien llame al API no tiene por que conocer esa
+    tabla de conversion por fuente, ver SHOT_COORD_CALIBRATION.
+    shot_type: "2" o "3" -- tipo de intento REAL, no derivado de zone
+    (ver docstring de train_shot.py sobre por que se entrena con las
+    dos columnas a la vez).
+
+    Reutiliza _classify_zone() y los umbrales three_pt_*_m de
+    SHOT_COORD_CALIBRATION (src/features.py) -- misma formula de zona
+    que el dataset de entrenamiento, no una copia.
+
+    Lanza PredictionError si `source` no tiene coordenadas calibradas,
+    si shot_type no es "2"/"3", o si el modelo entrenado no vio esa
+    fuente en su propio entrenamiento -- este ultimo caso NO fallaria
+    con una excepcion de sklearn (OneHotEncoder(handle_unknown="ignore")
+    simplemente la trataria como todo-ceros), pero seria una prediccion
+    silenciosa sobre una categoria que el modelo nunca aprendio, asi que
+    se rechaza explicitamente ("avisa y no adivina").
+    """
+    if source not in SHOT_COORD_CALIBRATION:
+        raise PredictionError(
+            f"Sin coordenadas de tiro calibradas para source={source!r}. "
+            f"Fuentes calibradas: {sorted(SHOT_COORD_CALIBRATION)}"
+        )
+    if shot_type not in ("2", "3"):
+        raise PredictionError(f"shot_type debe ser '2' o '3' (recibido {shot_type!r}).")
+
+    try:
+        trained_sources = set(load_shot_metadata().get("sources", []))
+    except PredictionError:
+        trained_sources = set()
+    if trained_sources and source not in trained_sources:
+        raise PredictionError(
+            f"El modelo de tiro no se entreno con source={source!r} "
+            f"(entrenado con {sorted(trained_sources)}) -- se rechaza la "
+            f"prediccion en vez de devolver un numero no fiable."
+        )
+
+    calib = SHOT_COORD_CALIBRATION[source]
+    dist_m = math.hypot(x_m, y_m)
+    angle_deg = math.degrees(math.atan2(abs(x_m), y_m))
+    zone = _classify_zone(dist_m, x_m, calib["three_pt_arc_m"], calib["three_pt_corner_m"])
+
+    row = {
+        "dist_m": dist_m, "angle_deg": angle_deg, "zone": zone,
+        "shot_type": shot_type, "source": source,
+    }
+    X = pd.DataFrame([row], columns=SHOT_FEATURE_COLS)
+
+    model = load_shot_model(model_name)
+    make_prob = float(model.predict_proba(X)[0, 1])
+
+    return {
+        "source": source,
+        "x_m": x_m,
+        "y_m": y_m,
+        "dist_m": round(dist_m, 3),
+        "angle_deg": round(angle_deg, 1),
+        "zone": zone,
+        "shot_type": shot_type,
+        "model": model_name,
+        "make_probability": round(make_prob, 4),
     }

@@ -73,8 +73,29 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from src.features import build_shot_features, zone_fg_pct
+from src.features import SHOT_COORD_CALIBRATION, build_shot_features, zone_fg_pct
 from src.pipeline import get_connection
+from src.scraper.base import TRAINABLE_SOURCES
+
+# AMPLIACION 2026-09-20: al ampliar FebSource a 8 competiciones (ver
+# feb.py/base.py) resulto que get_shots() SI esta implementado alli --
+# feb/lfendesa/lfchallenge/lf2/segundafeb/tercerafeb/copaespaa ya tienen
+# tiros reales en la tabla `shots` (confirmado corriendo este mismo
+# script: 100k-190k tiros cada una segun la competicion), algo que el
+# comentario de SHOT_COORD_CALIBRATION en features.py daba por no
+# existente todavia -- ya corregido alli. Pero NADIE ha calibrado sus
+# coordenadas (three_pt_arc_m/three_pt_corner_m, conversion a metros)
+# con el mismo rigor que NBA/Euroliga/EuroCup/WNBA (confirmacion en vivo
+# + densidad de tiros, ver notebook secciones 3/5/6) -- eso es un
+# trabajo de verificacion aparte, no algo que se pueda inventar aqui sin
+# violar "no adivinar". Por eso este script fija `sources` explicitamente
+# a solo las fuentes YA calibradas (interseccion de SHOT_COORD_CALIBRATION
+# y TRAINABLE_SOURCES) en vez de dejar que build_shot_features(conn) sin
+# argumentos intente coger TODAS las entrenables con tiros -- así, el
+# dia que se calibre una fuente nueva, este script la coge sola sin
+# tocar codigo, y mientras tanto no revienta en bloque por culpa de
+# fuentes con tiros reales pero sin calibrar todavia.
+SHOT_TRAINABLE_SOURCES = sorted(set(SHOT_COORD_CALIBRATION) & TRAINABLE_SOURCES)
 
 NUMERIC_COLS = ["dist_m", "angle_deg"]
 CATEGORICAL_COLS = ["zone", "shot_type", "source"]
@@ -152,8 +173,9 @@ def main() -> None:
     args = parser.parse_args()
 
     conn = get_connection()
-    print("Construyendo dataset de tiros (build_shot_features(), fuentes entrenables)...")
-    shots = build_shot_features(conn)
+    print(f"Construyendo dataset de tiros (build_shot_features(), fuentes calibradas y "
+          f"entrenables: {SHOT_TRAINABLE_SOURCES})...")
+    shots = build_shot_features(conn, sources=SHOT_TRAINABLE_SOURCES)
     if shots.empty:
         print("  (vacio -- no hay tiros de fuentes entrenables todavia en la base de datos)")
         conn.close()

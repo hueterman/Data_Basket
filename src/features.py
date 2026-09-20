@@ -86,9 +86,20 @@ SHOT_COORD_CALIBRATION: dict[str, dict] = {
         "three_pt_arc_m": 6.750,   # 22'1.75", uniforme (sin variar en la esquina)
         "three_pt_corner_m": 6.750,
     },
-    # acb/feb: sin datos de tiro todavia (acb.py no implementa
-    # get_shots(); feb.py sin confirmar en vivo) -- se anaden aqui el
-    # dia que haya coordenadas reales que calibrar, no antes.
+    # acb: sin datos de tiro todavia -- acb.py no implementa get_shots().
+    #
+    # feb / lfendesa / lfchallenge / lf2 / segundafeb / tercerafeb /
+    # copaespaa (FebSource, ver feb.py): CORRECCION 2026-09-20 -- al
+    # contrario de lo que decia esta nota antes, get_shots() SI esta
+    # implementado y SI hay tiros reales guardados (confirmado corriendo
+    # train_shot.py: 100k-190k filas en `shots` por competicion, ver su
+    # docstring). Lo que falta es calibrar loc_x/loc_y a metros y las
+    # distancias reales de la linea de 3 de baloncestoenvivo.feb.es con
+    # el mismo rigor que el resto de esta tabla (confirmacion en vivo +
+    # densidad de tiros, ver notebook secciones 3/5/6) -- no se inventa
+    # aqui sin esa verificacion. Hasta entonces, train_shot.py excluye
+    # estas fuentes explicitamente (SHOT_TRAINABLE_SOURCES en su
+    # cabecera) en vez de fallar en bloque por _require_known_sources().
 }
 
 

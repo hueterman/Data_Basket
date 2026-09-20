@@ -1,25 +1,22 @@
 # API REST del proyecto (Flask)
 
-Sirve por HTTP el modelo de **resultado de partido** entrenado por
-`train.py` (`models/game_outcome_logreg.joblib` /
-`game_outcome_xgb.joblib`) sobre los datos ya guardados en
-`data/processed/basketball.db`. Es de solo lectura, igual que
-`app/app.py`: ninguna ruta escribe en la base de datos.
-
-No incluye (todavia) el modelo de probabilidad de tiro de
-`train_shot.py` -- se dejo fuera de esta primera version a proposito
-(alcance acordado explicitamente antes de construirla) para no mezclar
-dos contratos de API distintos en el primer paso; se puede añadir mas
-adelante como un endpoint `/predict_shot` separado si hace falta.
+Sirve por HTTP los dos modelos de `train.py`/`train_shot.py` sobre los
+datos ya guardados en `data/processed/basketball.db`: **resultado de
+partido** (`models/game_outcome_logreg.joblib` / `game_outcome_xgb.joblib`)
+y **probabilidad de que un tiro entre** (`models/shot_make_logreg.joblib`
+/ `shot_make_xgb.joblib`, añadido en una segunda fase). Es de solo
+lectura, igual que `app/app.py`: ninguna ruta escribe en la base de
+datos.
 
 ## Arrancar
 
 Requiere haber entrenado los modelos antes (si `models/` esta vacio,
-`/predict` y `/model/info` devuelven un error JSON explicito en vez de
+las rutas correspondientes devuelven un error JSON explicito en vez de
 fallar en silencio):
 
 ```
-python train.py
+python train.py         # modelo de resultado de partido
+python train_shot.py    # modelo de probabilidad de tiro
 ```
 
 Luego:
@@ -63,6 +60,39 @@ api/app.py`), igual que `app/app.py`.
   jugados esta temporada todavia, misma exigencia -- `min_prior_games`,
   5 por defecto -- que usa `train.py` para construir el dataset de
   entrenamiento).
+- `GET /model/info/shot` -- igual que `/model/info` pero para el modelo
+  de tiro: metricas, `sources` (las fuentes con las que se entreno de
+  verdad -- ahora mismo NBA, Euroliga, EuroCup y NextGen, ver mas
+  abajo), `sanity_check_by_zone`...
+- `POST /predict_shot` -- cuerpo JSON:
+  ```json
+  {
+    "source": "nba",
+    "x_m": 2.5,
+    "y_m": 5.0,
+    "shot_type": "2",
+    "model": "xgboost"
+  }
+  ```
+  `x_m`/`y_m` son coordenadas en **metros con origen en el aro** (misma
+  convencion que `loc_x_m`/`loc_y_m` en `build_shot_features()`, NO las
+  unidades nativas que guarda cada scraper en la tabla `shots` --
+  decimas de pie en NBA, centimetros en Euroliga/EuroCup). `shot_type`
+  es `"2"` o `"3"` (tipo de intento real). Devuelve `make_probability`
+  mas `zone`/`dist_m`/`angle_deg` ya calculados con las mismas formulas
+  que `src/features.py`.
+
+  **Solo fuentes con coordenadas de tiro CALIBRADAS y con las que el
+  modelo se entreno de verdad**: a fecha de esta version, `nba`,
+  `euroleague`, `eurocup` y `nextgen`. Al ampliar FEB a 8 competiciones
+  (fase anterior) resulto que `feb`/`lfendesa`/`lfchallenge`/`lf2`/
+  `segundafeb`/`tercerafeb`/`copaespaa` YA TIENEN tiros reales guardados
+  (100k-190k por competicion) -- pero nadie ha calibrado sus coordenadas
+  a metros ni sus distancias reales de triple con la verificacion en
+  vivo que llevan el resto de fuentes (ver `SHOT_COORD_CALIBRATION` en
+  `src/features.py`), asi que `/predict_shot` las rechaza explicitamente
+  con un 400 en vez de adivinar una calibracion sin confirmar. Es
+  trabajo pendiente, no un descuido de esta fase.
 
 Ejemplo de error (equipo sin partidos jugados, fuente desconocida,
 `home_team_id == away_team_id`, modelo inexistente, o modelos sin
@@ -100,12 +130,21 @@ ambos equipos por defecto (`diff_rest_days = 0`) -- se puede afinar con
   (mismo equipo local/visitante, equipo inexistente, fuente sin datos,
   modelo desconocido) lanzan `PredictionError` en vez de reventar.
 - **Integracion real** (`scripts/test_api.py`, parte 2, SOLO si ya
-  existen `models/game_outcome_*.joblib` reales): cliente de pruebas de
+  existen los `.joblib` reales correspondientes): cliente de pruebas de
   Flask (sin levantar el servidor) contra la base de datos real
   (`data/processed/basketball.db`) -- `GET /health`, `/model/info`,
-  `/teams?source=nba` y un `POST /predict` real entre dos equipos NBA
-  reales, mas una peticion mal formada para comprobar el 400. Ejecutado
-  de verdad en esta sesion: `home_win_probability=0.4654` para un
-  partido Atlanta Hawks (local) - Boston Celtics (visitante), numero
-  razonable, no se ha comprobado contra ninguna casa de apuestas ni
-  fuente externa (no es esa la funcion de esta prueba).
+  `/teams?source=nba`, un `POST /predict` real entre dos equipos NBA
+  reales, `GET /model/info/shot`, dos `POST /predict_shot` reales (uno
+  junto al aro, otro un triple de arco) mas peticiones mal formadas
+  para comprobar los 400. Ejecutado de verdad en esta sesion:
+  `home_win_probability=0.4654` para Atlanta Hawks (local) - Boston
+  Celtics (visitante); para tiro, `make_probability=0.9457` junto al
+  aro vs `0.0018` en un triple muy de frente y justo pasada la linea --
+  el primero es razonable, el segundo probablemente refleja mas el
+  AUC modesto del modelo (0.653, ver `/model/info/shot`) que la
+  realidad del baloncesto (un triple asi deberia rondar el 30-35%, no
+  el 0.2%) -- limitacion real del modelo de `train_shot.py` (features
+  limitadas a distancia/angulo/zona/tipo/fuente, sin nada de contexto
+  del defensor ni del tirador), no un bug de como el API lo sirve. No
+  se ha comprobado ningun numero contra una casa de apuestas ni fuente
+  externa (no es esa la funcion de esta prueba).

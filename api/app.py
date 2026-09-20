@@ -54,6 +54,22 @@ Endpoints:
         Devuelve home_win_probability/away_win_probability y avisos
         ("warnings") si algun equipo tiene poco historial esta
         temporada todavia.
+
+    GET  /model/info/shot
+        Igual que /model/info pero para el modelo de PROBABILIDAD DE
+        TIRO (train_shot.py) -- metricas, "sources" (las fuentes con
+        las que se entreno de verdad), sanity_check_by_zone...
+
+    POST /predict_shot
+        Body JSON: {"source": "nba", "x_m": 2.5, "y_m": 5.0,
+        "shot_type": "2", "model": "xgboost" (opcional)}. x_m/y_m son
+        METROS con origen en el aro (no las unidades nativas de cada
+        scraper -- ver docstring de src/predict.py:shot_make_probability()).
+        SOLO fuentes con coordenadas de tiro calibradas Y con las que
+        se entreno de verdad el modelo (nunca FEB/lfendesa/etc todavia,
+        pese a que ya tienen tiros reales guardados -- ver la nota
+        "AMPLIACION 2026-09-20" en train_shot.py sobre por que). Devuelve
+        make_probability mas la zona/distancia/angulo ya calculados.
 """
 from __future__ import annotations
 
@@ -68,7 +84,15 @@ if str(PROJECT_ROOT) not in sys.path:
 from flask import Flask, jsonify, request
 
 from src.pipeline.db import get_connection
-from src.predict import PredictionError, available_models, load_metadata, predict_game
+from src.predict import (
+    PredictionError,
+    available_models,
+    available_shot_models,
+    load_metadata,
+    load_shot_metadata,
+    predict_game,
+    shot_make_probability,
+)
 
 app = Flask(__name__)
 
@@ -88,11 +112,26 @@ def health():
 
 @app.route("/model/info")
 def model_info():
+    """Metadata del modelo de RESULTADO DE PARTIDO (train.py)."""
     try:
         metadata = load_metadata()
     except PredictionError as exc:
         return jsonify({"error": str(exc)}), 404
     metadata["available_models"] = available_models()
+    return jsonify(metadata)
+
+
+@app.route("/model/info/shot")
+def model_info_shot():
+    """Metadata del modelo de PROBABILIDAD DE TIRO (train_shot.py) --
+    ruta separada de /model/info porque son dos modelos con metricas y
+    columnas de features completamente distintas, no dos versiones de
+    lo mismo."""
+    try:
+        metadata = load_shot_metadata()
+    except PredictionError as exc:
+        return jsonify({"error": str(exc)}), 404
+    metadata["available_models"] = available_shot_models()
     return jsonify(metadata)
 
 
@@ -142,6 +181,35 @@ def predict():
         return jsonify({"error": str(exc)}), 400
     finally:
         conn.close()
+
+    return jsonify(result)
+
+
+@app.route("/predict_shot", methods=["POST"])
+def predict_shot():
+    data = request.get_json(silent=True) or {}
+
+    required = ("source", "x_m", "y_m", "shot_type")
+    missing = [k for k in required if data.get(k) is None]
+    if missing:
+        return jsonify({"error": f"Faltan campos obligatorios: {missing}"}), 400
+
+    try:
+        x_m = float(data["x_m"])
+        y_m = float(data["y_m"])
+    except (TypeError, ValueError):
+        return jsonify({"error": "x_m/y_m deben ser numericos."}), 400
+
+    try:
+        result = shot_make_probability(
+            source=data["source"],
+            x_m=x_m,
+            y_m=y_m,
+            shot_type=str(data["shot_type"]),
+            model_name=data.get("model", "xgboost"),
+        )
+    except PredictionError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     return jsonify(result)
 

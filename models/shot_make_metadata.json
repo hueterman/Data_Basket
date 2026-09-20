@@ -1,0 +1,68 @@
+{
+  "target": "made",
+  "feature_cols": [
+    "dist_m",
+    "angle_deg",
+    "zone",
+    "shot_type",
+    "source"
+  ],
+  "test_frac": 0.2,
+  "n_train": 1454206,
+  "n_test": 368118,
+  "sources": [
+    "eurocup",
+    "euroleague",
+    "nba",
+    "nextgen"
+  ],
+  "metrics": {
+    "baseline": {
+      "accuracy": 0.5296942828114898,
+      "log_loss": 0.6914035416957541,
+      "roc_auc": 0.5
+    },
+    "logreg": {
+      "accuracy": 0.6244845402832787,
+      "log_loss": 0.6542558898374891,
+      "roc_auc": 0.6469355743200261
+    },
+    "xgboost": {
+      "accuracy": 0.6274346812706795,
+      "log_loss": 0.6462020018270292,
+      "roc_auc": 0.6532800211888605
+    }
+  },
+  "sanity_check_by_zone": [
+    {
+      "zone": "aro",
+      "intentos": 94962,
+      "fg_pct_real": 0.683,
+      "prob_media_predicha": 0.667
+    },
+    {
+      "zone": "media_larga",
+      "intentos": 52168,
+      "fg_pct_real": 0.423,
+      "prob_media_predicha": 0.422
+    },
+    {
+      "zone": "pintura_corta",
+      "intentos": 68423,
+      "fg_pct_real": 0.459,
+      "prob_media_predicha": 0.447
+    },
+    {
+      "zone": "triple_arco",
+      "intentos": 111129,
+      "fg_pct_real": 0.348,
+      "prob_media_predicha": 0.349
+    },
+    {
+      "zone": "triple_esquina",
+      "intentos": 41436,
+      "fg_pct_real": 0.387,
+      "prob_media_predicha": 0.387
+    }
+  ]
+}
