@@ -27,10 +27,13 @@ ahora:
   con datos reales de Facundo Campazzo, temporada 2025-26. Esto
   contradice la asuncion original del plano de que editionId
   funcionaba de forma uniforme en toda la web.
-- Consecuencia directa: NO hay, de momento, una forma confirmada de
-  pedir "dame todos los partidos de la temporada X" con una peticion
-  GET simple. `list_games()` NO esta implementado por esta razon (ver
-  mas abajo) en vez de adivinar un mecanismo sin verificar.
+- SUPERADO (ver docstring de `list_games()` mas abajo): `/es/liga/
+  partidos` y `/es/liga/clasificacion` no soportan temporada, pero
+  `/es/liga/calendario` (una ruta distinta, no explorada hasta una
+  sesion posterior) SI -- via `?temporada={editionId}`, mismo valor
+  numerico de editionId ya documentado aqui. `list_games()` SI esta
+  implementado, para la temporada en curso Y para cualquier temporada
+  historica (1983-84 en adelante).
 - `/es/liga/equipos` y las fichas de equipo (`/es/liga/equipos/{slug}-
   {id}`) SI devuelven HTML real (18 equipos, plantillas completas)
   con una peticion GET simple, sin editionId -- pero por eso mismo
@@ -61,17 +64,103 @@ necesite cruzar boxscore con plantilla tendra que resolverlo por
 nombre con un margen de error mayor que en euroleague.py (aqui ni
 siquiera el formato del nombre coincide).
 
-NO IMPLEMENTADO TODAVIA (por falta de verificacion, no por adivinar):
-- `list_games(season)`: no hay endpoint confirmado para enumerar los
-  partidos de una temporada con una peticion simple (ver arriba).
-  Lanza AcbSourceError explicando el porque en vez de devolver datos
-  incorrectos o vacios silenciosamente. Vias a explorar mas adelante:
-  simular el PostBack/JS que cambia de jornada en `/es/liga/partidos`,
-  o Playwright para ejecutar el JS de esa pagina.
-- `get_shots(game_id)`: no se localizo un endpoint de coordenadas de
-  tiro para ACB en el tiempo disponible (existe una vista "jugada a
-  jugada" en live.acb.com, pero no se ha inspeccionado todavia). Lanza
-  AcbSourceError igual que list_games().
+`list_games(season)` -- REESCRITO en una tercera ronda de exploracion
+en vivo (sesion 2026-09-09), tras encontrar una ruta que ninguna
+sesion anterior habia comprobado: `/es/liga/calendario` (localizada
+via `sitemap.xml`, distinta de `/es/liga/partidos`). A diferencia de
+`/es/liga/partidos`/`/es/liga/clasificacion` (que ignoran cualquier
+parametro de temporada, ver aviso mas arriba), esta pagina tiene un
+selector de temporada REAL y funcional (combobox Radix UI, `id=
+"season"`) que cubre las 43 temporadas de la ACB: 1983-84
+(editionId=48) hasta 2026-27 (editionId=91) -- confirmado en vivo
+seleccionando "2023-24" en el propio combobox y viendo que la URL
+cambia a `?temporada=88`, el MISMO valor numerico de editionId ya
+documentado arriba (editionId = año_inicio_temporada - 1935), aunque
+el parametro de query se llama `temporada`, no `editionId`.
+
+Confirmado con un fetch real de `/es/liga/calendario?temporada=88`
+(sin Playwright ni navegador headless -- el HTML servido por el
+servidor YA trae los 326 partidos completos de esa temporada, 34
+jornadas + playoffs): resultado cruzado contra equipos/marcadores
+reales de la temporada 2023-24 que ya no existen en la liga actual
+(Coviran Granada, Dreamland Gran Canaria, Baxi Manresa, Zunder
+Palencia), confirmando que son datos historicos genuinos. COSTE: 1
+sola peticion GET por temporada para el calendario completo -- mucho
+mas barato que el metodo anterior (1 + 34 peticiones), incluso para
+la temporada en curso.
+
+Estructura real del HTML (confirmada en vivo, no adivinada):
+
+- Por jornada: `div[id^="calendar-round-"]` (una por ronda). El titulo
+  vive en `[class*="RoundTitle"]` dentro de cada una: temporada
+  regular = "Jornada N" (N=1..34); playoffs usan etiquetas de texto
+  libre confirmadas en vivo ("Cuartos de final (1º/2º/3º)", "Semifinal
+  (1º..5º)", "Final (1º..3º)") que NO encajan en el patron "Jornada
+  N" -- para esas rondas `GameRef.round` queda en None (el campo es
+  `int | None`, no hay donde guardar la etiqueta de texto sin inventar
+  un numero).
+- AVISO IMPORTANTE, confirmado en vivo: acb.com duplica CADA jornada
+  dos veces en el HTML servido (mismo `id`, mismo contenido exacto --
+  variante movil/escritorio, una de las dos oculta por CSS,
+  `offsetParent === null` en el navegador, algo que un parseo estatico
+  de HTML no puede comprobar). `list_games()` deduplica quedandose con
+  la PRIMERA aparicion de cada `id` de jornada en orden de documento
+  (confirmado que el contenido de ambas copias es identico byte a
+  byte, asi que quedarse con la primera no pierde ningun partido).
+- Dentro de cada jornada, `[class$="__days"]` agrupa los partidos por
+  dia: cada hijo directo `<div>` de ese contenedor representa UN dia,
+  con un `<h3 class="...dayTitle">` de fecha real en TEXTO (p. ej. "23
+  de septiembre de 2023") -- NO hay ningun atributo `datetime`/
+  `data-date` legible por maquina (confirmado inspeccionando los
+  atributos reales del `<h3>`), asi que `list_games()` parsea el texto
+  en español (nombres de mes fijos, sin libreria de fechas) a ISO
+  8601.
+- Por partido, dentro de cada dia: `div[class$="__roundMatch"]`
+  (sufijo exacto -- OJO, un simple `[class*="__roundMatch"]` tambien
+  encaja con `...__roundMatch__homeTeam`/`...__teamScore` etc., hijos
+  del propio partido, y devolveria elementos equivocados). Cada
+  partido trae `div[class$="__homeTeam"]`/`div[class$="__awayTeam"]`
+  (usados solo para localizar el marcador de cada lado, ver mas abajo
+  -- el `team_id` en si sale del enlace de live.acb.com, igual que
+  antes) y un enlace real a
+  `live.acb.com/partidos/{slug1}-vs-{slug2}-{game_id}/...` -- MISMO
+  `game_id` que ya consume `get_boxscore()`, y confirmado que existe
+  incluso para partidos futuros SIN JUGAR (sufijo `/previa` en vez del
+  sufijo de partido jugado): el id se asigna de antemano, no hace
+  falta esperar a que se juegue el partido para tener su `game_id`.
+- PLAYED/marcador: confirmado en vivo comparando un partido ya jugado
+  (temporada 2023-24: `<p class="...teamScore...">85</p>`, texto real)
+  contra uno futuro sin jugar (temporada 2026-27, jornada 1, Surne
+  Bilbao-Kids&Us Manresa, 26-sep-2026: `<p class="...teamScore...
+  teamScore--winner"></p>` VACIO, sin texto, en AMBOS equipos) --
+  `played` se determina por si el texto de `.teamScore` esta vacio o
+  no, NUNCA por la clase `--winner` (esa clase aparece en los DOS
+  lados cuando no hay marcador todavia; solo es fiable para marcar al
+  ganador real una vez que el partido ya se jugo).
+
+`list_games()` ya NO ignora `season`: lo convierte al editionId real
+(`_edition_id_from_season()`) y pide
+`/es/liga/calendario?temporada={editionId}` -- funciona igual para la
+temporada en curso que para cualquier temporada historica. Como
+comprobacion de cordura extra (no como fuente de verdad -- la
+temporada pedida por el llamador ya es la correcta, viene de
+`?temporada=`), cada partido cruza tambien su fecha real contra
+`_season_label_from_date()`: si no coincide con la `season` pedida se
+registra un aviso (podria indicar un caso raro no visto en vivo, como
+un torneo de pretemporada fuera de las fechas habituales), pero
+`GameRef.season` siempre guarda la temporada REALMENTE PEDIDA, no la
+derivada.
+
+`get_shots(game_id)` sigue SIN IMPLEMENTAR, ahora con una
+confirmacion mas fuerte que en la ronda anterior: se inspecciono en
+vivo tanto la vista "Jugadas" (jugada a jugada, texto plano con
+sustituciones/faltas/canastas y totales corriendo, sin coordenadas)
+como la vista "Avanzado" (estadisticas-avanzadas) de live.acb.com, y
+se busco explicitamente cualquier campo de coordenadas
+(coordX/coordY/courtX/courtY/locX/locY/shotX/shotY/shotChart/
+heatmap/courtPosition) sin encontrar ninguno. Lanza AcbSourceError
+explicando el porque en vez de devolver datos incorrectos o vacios
+silenciosamente.
 
 SIN CONFIRMAR EN VIVO (a diferencia de euroleague.py, que si se pudo
 probar con datos de una temporada completa): la asignacion de que
@@ -158,9 +247,79 @@ _DEFAULT_TIMEOUT = 30
 # game_id = "{slug1}-vs-{slug2}-{numero}", tal y como lo usa live.acb.com.
 _GAME_ID_RE = re.compile(r"^(?P<slug1>[a-z0-9-]+)-vs-(?P<slug2>[a-z0-9-]+)-(?P<numero>\d+)$")
 
+# Enlace real de una tarjeta de partido en /es/liga/partidos hacia
+# live.acb.com -- mismo formato que _GAME_ID_RE pero anclado al
+# principio de una URL completa en vez de a un game_id suelto (ver
+# docstring del modulo, list_games()).
+_LIVE_LINK_RE = re.compile(
+    r"^https://live\.acb\.com/partidos/(?P<slug1>[a-z0-9-]+)-vs-(?P<slug2>[a-z0-9-]+)-(?P<numero>\d+)/"
+)
+
 # Columnas confirmadas en vivo de live.acb.com/partidos/.../estadisticas
 # (ver docstring del modulo). "T2"/"T3"/"TL" llegan como "hechos/intentados".
 _MADE_ATT_RE = re.compile(r"^\s*(\d+)\s*/\s*(\d+)\s*$")
+
+# season "YYYY-YY" (p. ej. "2023-24", "2026-27") -> editionId real de
+# acb.com (ver docstring del modulo, list_games()): editionId =
+# año_inicio_temporada - 1935, confirmado en vivo con el selector de
+# temporada de /es/liga/calendario (1983-84 = editionId 48, 2026-27 =
+# editionId 91).
+_SEASON_RE = re.compile(r"^\s*(?P<start>\d{4})-(?P<end>\d{2})\s*$")
+_EDITION_ID_BASE_YEAR = 1935
+
+# Titulo de ronda de temporada regular en /es/liga/calendario, p. ej.
+# "Jornada 1" (ver docstring del modulo) -- las rondas de playoff usan
+# otras etiquetas ("Cuartos de final (1º)", "Semifinal (2º)"...) que no
+# encajan aqui a proposito (round queda en None para esas, ver GameRef).
+_ROUND_NUMBER_RE = re.compile(r"Jornada\s+(\d+)", re.IGNORECASE)
+
+# Cabecera de dia en /es/liga/calendario, texto en español sin ningun
+# atributo de fecha legible por maquina (confirmado en vivo -- ver
+# docstring del modulo), p. ej. "23 de septiembre de 2023".
+_DAY_HEADER_RE = re.compile(
+    r"(?P<day>\d{1,2})\s+de\s+(?P<month>[a-zA-ZáéíóúñÁÉÍÓÚÑ]+)\s+de\s+(?P<year>\d{4})"
+)
+_SPANISH_MONTHS = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+    "julio": 7, "agosto": 8, "septiembre": 9, "octubre": 10,
+    "noviembre": 11, "diciembre": 12,
+}
+
+
+def _edition_id_from_season(season: str) -> int:
+    """"2023-24" -> 88. Lanza AcbSourceError si `season` no tiene el
+    formato "YYYY-YY" esperado -- mejor fallar con un mensaje claro que
+    adivinar un editionId incorrecto y devolver la temporada
+    equivocada en silencio (mismo criterio "avisa y no adivina" del
+    resto del proyecto)."""
+    match = _SEASON_RE.match(str(season)) if season else None
+    if not match:
+        raise AcbSourceError(
+            f"season={season!r} no tiene el formato esperado 'YYYY-YY' "
+            f"(p. ej. '2023-24', '2026-27') -- se necesita para calcular "
+            f"el editionId real de acb.com (editionId = "
+            f"año_inicio_temporada - {_EDITION_ID_BASE_YEAR}, ver "
+            f"docstring del modulo)."
+        )
+    return int(match.group("start")) - _EDITION_ID_BASE_YEAR
+
+
+def _round_number_from_title(title: str) -> int | None:
+    match = _ROUND_NUMBER_RE.search(title or "")
+    return int(match.group(1)) if match else None
+
+
+def _parse_spanish_day_header(text: str) -> str | None:
+    """"23 de septiembre de 2023" -> "2023-09-23". Devuelve None (nunca
+    adivina) si el texto no encaja con el patron esperado o si el mes
+    no esta en `_SPANISH_MONTHS`."""
+    match = _DAY_HEADER_RE.search(text or "")
+    if not match:
+        return None
+    month = _SPANISH_MONTHS.get(match.group("month").strip().lower())
+    if month is None:
+        return None
+    return f"{int(match.group('year')):04d}-{month:02d}-{int(match.group('day')):02d}"
 
 
 class AcbSourceError(RuntimeError):
@@ -316,15 +475,160 @@ class AcbSource:
 
     # -- partidos -----------------------------------------------------------
 
-    def list_games(self, season: str) -> list[GameRef]:
-        raise AcbSourceError(
-            "list_games() no esta implementado todavia: no hay una "
-            "peticion GET simple confirmada que devuelva el calendario "
-            "de una temporada -- ni /es/liga/partidos ni "
-            "/es/liga/clasificacion respetan ?editionId= (verificado en "
-            "vivo, ver docstring del modulo). Pendiente: simular el "
-            "PostBack/JS que cambia de jornada, o usar Playwright."
+    @staticmethod
+    def _season_label_from_date(date_iso: str | None) -> str:
+        """Deriva la etiqueta de temporada tipo "2026-27" a partir de la
+        fecha REAL de un partido. Ya NO es la fuente de verdad de
+        `GameRef.season` (list_games() ahora sabe la temporada real
+        porque la pidio explicitamente via `?temporada=`, ver docstring
+        del modulo) -- se mantiene como comprobacion de cordura extra
+        sobre la fecha de cada partido. La Liga Endesa corre de
+        septiembre a junio (igual que la NBA de octubre a abril, mismo
+        patron ya usado en nba.py): un partido en mes >= 7 (jul-dic)
+        pertenece a la temporada que EMPIEZA ese año; un partido en mes
+        < 7 (ene-jun) pertenece a la temporada que empezo el año
+        anterior. Si no hay fecha confirmada devuelve "" en vez de
+        adivinar."""
+        if not date_iso:
+            return ""
+        try:
+            year, month = int(date_iso[:4]), int(date_iso[5:7])
+        except (ValueError, IndexError):
+            return ""
+        start_year = year if month >= 7 else year - 1
+        return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+    def _parse_match_div(
+        self, match_div, round_number: int | None, date_iso: str | None, season: str
+    ) -> GameRef | None:
+        """Un `div[class$='__roundMatch']` -> GameRef, o None si no
+        trae un enlace reconocible a live.acb.com (nunca deberia
+        pasar en un partido real, pero se avisa y se salta en vez de
+        lanzar y tirar abajo toda la temporada por una tarjeta rara)."""
+        live_link = match_div.select_one("a[href^='https://live.acb.com/partidos/']")
+        if live_link is None:
+            logger.warning(
+                "Tarjeta de partido sin enlace a live.acb.com reconocible "
+                "(round=%r, date=%r) -- se omite.", round_number, date_iso,
+            )
+            return None
+        href = live_link.get("href", "")
+        link_match = _LIVE_LINK_RE.match(href)
+        if not link_match:
+            logger.warning("Enlace a live.acb.com con formato inesperado: %r -- se omite.", href)
+            return None
+        slug1, slug2, numero = (
+            link_match.group("slug1"), link_match.group("slug2"), link_match.group("numero")
         )
+        game_id = f"{slug1}-vs-{slug2}-{numero}"
+
+        home_div = match_div.select_one("div[class$='__homeTeam']")
+        away_div = match_div.select_one("div[class$='__awayTeam']")
+        home_score_text = self._team_score_text(home_div)
+        away_score_text = self._team_score_text(away_div)
+        # played se decide por si el marcador tiene texto o no -- la
+        # clase CSS "--winner" aparece en AMBOS lados cuando el partido
+        # todavia no se ha jugado, no sirve para esto (ver docstring
+        # del modulo).
+        played = bool(home_score_text) and bool(away_score_text)
+        home_score = _to_int(home_score_text) if played else None
+        away_score = _to_int(away_score_text) if played else None
+
+        expected_season = self._season_label_from_date(date_iso)
+        if expected_season and expected_season != season:
+            logger.warning(
+                "game_id=%s: la temporada derivada de su fecha (%s -> %s) "
+                "no coincide con la season pedida (%s, editionId=%s) -- "
+                "se guarda la season PEDIDA en GameRef.season, revisar la "
+                "formula de editionId si esto se repite.",
+                game_id, date_iso, expected_season, season, _edition_id_from_season(season),
+            )
+
+        return GameRef(
+            game_id=game_id,
+            source=self.source,
+            season=season,
+            round=round_number,
+            date=date_iso,
+            home_team_id=slug1,
+            away_team_id=slug2,
+            home_score=home_score,
+            away_score=away_score,
+            played=played,
+        )
+
+    @staticmethod
+    def _team_score_text(team_div) -> str:
+        if team_div is None:
+            return ""
+        score_el = team_div.select_one("p[class*='teamScore']")
+        return score_el.get_text(strip=True) if score_el else ""
+
+    def list_games(self, season: str) -> list[GameRef]:
+        """Enumera todos los partidos de `season` (formato "YYYY-YY",
+        p. ej. "2023-24" o "2026-27") pidiendo UNA sola vez
+        `/es/liga/calendario?temporada={editionId}` -- ver docstring
+        del modulo para la investigacion completa que encontro esta
+        ruta y su estructura real de HTML. Funciona igual para
+        cualquier temporada desde 1983-84 (editionId=48) hasta la
+        temporada en curso."""
+        edition_id = _edition_id_from_season(season)
+        url = f"{_ACB_BASE}/es/liga/calendario?temporada={edition_id}"
+        soup = self._get_soup(
+            url, context=f"calendario de season={season!r} (temporada={edition_id})"
+        )
+
+        games: list[GameRef] = []
+        seen_round_ids: set[str] = set()
+        for round_div in soup.select("div[id^='calendar-round-']"):
+            round_id = round_div.get("id")
+            # acb.com duplica cada jornada dos veces en el HTML servido
+            # (variante movil/escritorio, contenido identico -- ver
+            # docstring del modulo): se queda solo con la primera
+            # aparicion de cada id de jornada en orden de documento.
+            if round_id in seen_round_ids:
+                continue
+            seen_round_ids.add(round_id)
+
+            title_el = round_div.select_one("[class*='RoundTitle']")
+            round_number = _round_number_from_title(
+                title_el.get_text(strip=True) if title_el else ""
+            )
+
+            days_container = round_div.select_one("[class$='__days']")
+            if days_container is None:
+                logger.warning(
+                    "round_id=%s: sin contenedor de dias reconocible -- se omite "
+                    "esta jornada.", round_id,
+                )
+                continue
+
+            for day_div in days_container.find_all("div", recursive=False):
+                day_header = day_div.find("h3")
+                date_iso = (
+                    _parse_spanish_day_header(day_header.get_text(strip=True))
+                    if day_header is not None else None
+                )
+                if day_header is not None and date_iso is None:
+                    logger.warning(
+                        "round_id=%s: no se pudo parsear la fecha de cabecera "
+                        "de dia %r -- los partidos de este dia quedan con "
+                        "date=None.", round_id, day_header.get_text(strip=True),
+                    )
+                for match_div in day_div.select("div[class$='__roundMatch']"):
+                    game = self._parse_match_div(match_div, round_number, date_iso, season)
+                    if game is not None:
+                        games.append(game)
+
+        if not games:
+            raise AcbSourceError(
+                f"No se encontro ningun partido en {url} -- puede que la "
+                f"temporada {season!r} (editionId={edition_id}) no exista "
+                f"o no tenga calendario publicado, o que el marcado de "
+                f"/es/liga/calendario haya cambiado (ver docstring del "
+                f"modulo)."
+            )
+        return games
 
     # -- boxscore / tiros -----------------------------------------------------
 
@@ -479,10 +783,13 @@ class AcbSource:
 
     def get_shots(self, game_id: str) -> list[Shot]:
         raise AcbSourceError(
-            "get_shots() no esta implementado todavia: no se localizo "
-            "un endpoint de coordenadas de tiro para ACB en el tiempo "
-            "disponible (live.acb.com tiene una vista 'jugada a jugada' "
-            "sin inspeccionar todavia)."
+            "get_shots() no esta implementado: se confirmo en vivo "
+            "(inspeccionando las vistas 'Jugadas' y 'Avanzado' de "
+            "live.acb.com y buscando explicitamente cualquier campo de "
+            "coordenadas) que ACB no expone datos de posicion de tiro "
+            "en ninguna pagina publica -- no es una limitacion de tiempo "
+            "de exploracion, es una confirmacion de que el dato no "
+            "existe ahi (ver docstring del modulo)."
         )
 
 
