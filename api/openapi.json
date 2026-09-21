@@ -314,6 +314,14 @@
           },
           "shap_explanation": {
             "$ref": "#/components/schemas/ShapExplanation"
+          },
+          "home_elo": {
+            "type": "number",
+            "description": "Rating ELO opponent-adjusted ACTUAL del equipo local (base 1500 = sin historial todavia). Ver 'Rating ELO opponent-adjusted' en api/README.md."
+          },
+          "away_elo": {
+            "type": "number",
+            "description": "Igual que home_elo, para el visitante."
           }
         }
       },

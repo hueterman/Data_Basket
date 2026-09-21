@@ -50,7 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.features_pregame import ROLLING_STAT_COLS, build_pregame_game_dataset
 from src.pipeline import get_connection
 
-FEATURE_COLS = [f"diff_{c}_pre" for c in ROLLING_STAT_COLS] + ["diff_rest_days"]
+FEATURE_COLS = [f"diff_{c}_pre" for c in ROLLING_STAT_COLS] + ["diff_rest_days", "diff_elo_pre"]
 MODELS_DIR = Path(__file__).resolve().parent / "models"
 
 

@@ -147,8 +147,9 @@ cuando toque.
   mas un array `warnings` (p. ej. si algun equipo lleva pocos partidos
   jugados esta temporada todavia, misma exigencia -- `min_prior_games`,
   5 por defecto -- que usa `train.py` para construir el dataset de
-  entrenamiento) y `shap_explanation` (ver "Explicabilidad (SHAP)" mas
-  abajo).
+  entrenamiento), `home_elo`/`away_elo` (ver "Rating ELO
+  opponent-adjusted" mas abajo) y `shap_explanation` (ver
+  "Explicabilidad (SHAP)" mas abajo).
 - `GET /model/info/shot` -- igual que `/model/info` pero para el modelo
   de tiro: metricas, `sources` (las fuentes con las que se entreno de
   verdad -- ahora mismo NBA, Euroliga, EuroCup y NextGen, ver mas
@@ -291,10 +292,36 @@ cada equipo ha jugado ya en su temporada mas reciente -- ver el
 docstring de `src/predict.py` para el detalle completo.
 
 No se conoce la fecha real de un partido que no se ha jugado, asi que
-`rest_days` (la feature con menos peso de las nueve del modelo, ver
+`rest_days` (la feature con menos peso de las diez del modelo, ver
 coeficientes/importancias que imprime `train.py`) se asume igual para
 ambos equipos por defecto (`diff_rest_days = 0`) -- se puede afinar con
 `home_rest_days`/`away_rest_days` en el body si interesa.
+
+**Rating ELO opponent-adjusted (añadido 2026-09-21):** ademas de la
+media de estadisticas pre-partido de cada equipo, el modelo usa
+`diff_elo_pre` -- un rating ELO (base 1500, actualizado partido a
+partido con la formula estandar mas un multiplicador de margen de
+victoria adaptado de la metodologia ELO de NBA de FiveThirtyEight) que
+SI ajusta por la calidad de TODOS los rivales a los que se ha
+enfrentado un equipo, no solo su propio % de victorias -- un 8-2 contra
+rivales flojos y un 8-2 contra los mejores del grupo ya no se ven
+igual. Se probaron antes dos alternativas mas simples (prior de
+enfrentamiento directo con el mismo encogido bayesiano que el prior de
+jugador de tiro, y una "fuerza de calendario" de un solo salto) y
+NINGUNA de las dos aporto señal real en el split cronologico de
+train.py (roc_auc practicamente identico, incluso un pelin peor en el
+segundo caso) -- el ELO, al ajustar de forma ITERATIVA (la fuerza de un
+rival depende de a quien ha ganado el, encadenado sobre todo el
+historial), si la aporta: roc_auc 0.7406 -> 0.7481, log_loss 0.5901 ->
+0.5835, brier 0.2029 -> 0.1999 en el mismo split, y es la feature con
+MAS peso del modelo (coeficiente mas alto en la regresion logistica,
+gain dominante en XGBoost) -- ver el bloque "Rating ELO
+opponent-adjusted" en `src/features_pregame.py` para el detalle
+completo (formula, verificacion, limitaciones conocidas). `home_elo`/
+`away_elo` en la respuesta son el rating ACTUAL (a dia de hoy) de cada
+equipo, calculado en vivo reproduciendo todo el historial de la fuente
+(`_current_elo_ratings()` en `src/predict.py`) -- 1500 significa "sin
+historial todavia".
 
 **Arrastre entre temporadas (añadido 2026-09-21):** la media pre-partido
 de cada equipo ya NO es solo de su temporada mas reciente -- si el

@@ -9,7 +9,8 @@
     "diff_orb_pct_pre",
     "diff_ft_rate_pre",
     "diff_win_pre",
-    "diff_rest_days"
+    "diff_rest_days",
+    "diff_elo_pre"
   ],
   "min_prior_games": 5,
   "test_frac": 0.2,
@@ -22,36 +23,36 @@
       "roc_auc": 0.5
     },
     "logreg": {
-      "accuracy": 0.6847317744154058,
-      "log_loss": 0.5901284258700326,
-      "roc_auc": 0.7406072609956303
+      "accuracy": 0.6907840440165062,
+      "log_loss": 0.5834482450424303,
+      "roc_auc": 0.748092679974903
     },
     "xgboost": {
-      "accuracy": 0.6830811554332875,
-      "log_loss": 0.5945655282387616,
-      "roc_auc": 0.734609489760182
+      "accuracy": 0.6894085281980743,
+      "log_loss": 0.5868506795860062,
+      "roc_auc": 0.7434816990091216
     }
   },
   "logreg_metrics_by_source": {
     "acb": {
       "n": 703,
       "home_win_rate": 0.5761024182076814,
-      "accuracy": 0.6785206258890469
+      "accuracy": 0.6813655761024182
     },
     "eurocup": {
       "n": 164,
       "home_win_rate": 0.5914634146341463,
-      "accuracy": 0.6829268292682927
+      "accuracy": 0.676829268292683
     },
     "euroleague": {
       "n": 317,
       "home_win_rate": 0.6435331230283912,
-      "accuracy": 0.637223974763407
+      "accuracy": 0.6340694006309149
     },
     "feb": {
       "n": 254,
       "home_win_rate": 0.610236220472441,
-      "accuracy": 0.7047244094488189
+      "accuracy": 0.7086614173228346
     },
     "lf2": {
       "n": 29,
@@ -66,17 +67,17 @@
     "lfendesa": {
       "n": 200,
       "home_win_rate": 0.595,
-      "accuracy": 0.675
+      "accuracy": 0.69
     },
     "nba": {
       "n": 1621,
       "home_win_rate": 0.5496607032695867,
-      "accuracy": 0.6816779765576805
+      "accuracy": 0.6921653300431833
     },
     "segundafeb": {
       "n": 147,
       "home_win_rate": 0.6054421768707483,
-      "accuracy": 0.6870748299319728
+      "accuracy": 0.6938775510204082
     }
   }
 }

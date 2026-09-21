@@ -218,6 +218,215 @@ def _add_pregame_rolling(
     return df
 
 
+# ---------------------------------------------------------------------------
+# Rating ELO opponent-adjusted (AÑADIDO 2026-09-21)
+#
+# MOTIVACION: diff_win_pre (arriba) es el % de victorias del equipo esta
+# temporada, pero NO ajusta por la calidad de los rivales a los que se
+# enfrento -- un 8-2 contra rivales flojos no es lo mismo que un 8-2
+# contra los mejores del grupo. Se probaron primero dos alternativas MAS
+# SIMPLES (sesion 2026-09-21, ver historial de commits) y NINGUNA de las
+# dos aporto señal real en un split cronologico igual al de train.py:
+# - Prior de enfrentamiento directo (head-to-head), mismo patron de
+#   shrinkage que SHOT_PRIOR_K_SHRINK: roc_auc 0.7406 -> 0.7408-0.7409
+#   (ruido).
+# - "Fuerza de calendario" de un solo salto (media del win_pre de los
+#   rivales afrontados esta temporada): roc_auc 0.7403 -> 0.7400 (peor).
+# Un rating ELO ajusta por rival de forma ITERATIVA (la fuerza de un
+# equipo se deriva de a quien ha ganado/perdido, y la fuerza de esos
+# rivales de los suyos, encadenado sobre TODO el historial, no solo la
+# temporada actual) -- SI aporta señal real, verificado en el mismo
+# split cronologico sobre los 18180 partidos utilizables de las fuentes
+# entrenables: roc_auc 0.7406 -> 0.7481, log_loss 0.5901 -> 0.5835,
+# brier 0.2029 -> 0.1999 (con K=20, multiplicador de margen de victoria,
+# regresion del 50% a la media entre temporadas -- ver constantes mas
+# abajo). Correlacion con diff_win_pre = 0.887 -- alta pero no perfecta,
+# hay señal incremental real, no es un duplicado.
+#
+# COMO SE CALCULA (replay secuencial, nunca fuga de datos -- el rating
+# de un equipo ANTES de un partido solo depende de partidos con fecha
+# ANTERIOR, por construccion del propio algoritmo, igual que un
+# shift(1).expanding() pero recursivo en vez de una media):
+# 1. Cada equipo nuevo en una fuente arranca en ELO_BASE.
+# 2. Tras cada partido, se actualiza el rating de ambos equipos segun la
+#    formula ELO estandar (probabilidad esperada de ganar segun la
+#    diferencia de rating, con una ventaja de jugar en casa -- ver
+#    _source_home_advantage_elo()) mas un multiplicador de margen de
+#    victoria adaptado de la metodologia ELO de NBA de FiveThirtyEight
+#    (un partido ganado por mas puntos mueve mas el rating, amortiguado
+#    para que una diferencia de rating ya grande no infle aun mas al
+#    favorito por ganar "como se esperaba"): 538 no publica un paper
+#    formal de esto, es su formula de referencia, adoptada aqui tal
+#    cual y verificada empiricamente arriba, no una novedad propia.
+# 3. Al cambiar de temporada, el rating de cada equipo se REGRESA una
+#    fraccion (ELO_REGRESS_TO_MEAN) hacia ELO_BASE -- roster distinto
+#    temporada a temporada, mismo espiritu que SEASON_PRIOR_K_SHRINK
+#    pero como regresion a la media en vez de encogido bayesiano (el
+#    ELO ya es un unico numero acumulado, no una media de partidos que
+#    encoger).
+#
+# LIMITACIONES CONOCIDAS, no resueltas a proposito (alcance de esta
+# sesion): el punto de partida ELO_BASE para un equipo completamente
+# nuevo en una fuente no tiene en cuenta el nivel real de esa fuente
+# (un ascendido de una division inferior no entra con un rating mas
+# bajo); K/regresion se fijaron por valores redondos convencionales
+# (20 y 0.5) tras comprobar que el resultado es estable en un rango
+# razonable (K=10-40, regresion 0.25-0.5 dan roc_auc entre 0.745 y
+# 0.748), no por busqueda exhaustiva -- mismo criterio que el resto de
+# hiperparametros del proyecto (ver train.py).
+ELO_BASE = 1500.0
+ELO_K = 20.0
+ELO_REGRESS_TO_MEAN = 0.5
+
+# Ventaja de jugar en casa (ver _source_home_advantage_elo()): encogido
+# bayesiano hacia esta tasa global (verificada en datos reales -- %
+# de victorias del local en las 12 fuentes entrenables con marcador,
+# 19970 partidos) con ELO_HOME_ADV_SHRINK_K partidos virtuales.
+ELO_HOME_ADV_GLOBAL_FALLBACK_RATE = 0.580
+ELO_HOME_ADV_SHRINK_K = 300.0
+
+
+def _source_home_advantage_elo(
+    games_ordered: pd.DataFrame, k_shrink: float = ELO_HOME_ADV_SHRINK_K,
+    fallback_rate: float = ELO_HOME_ADV_GLOBAL_FALLBACK_RATE,
+) -> dict[str, float]:
+    """Ventaja de jugar en casa, en puntos ELO, por `source` -- necesaria
+    para que la probabilidad "esperada" de cada partido en _replay_elo()
+    no este sesgada. VERIFICADO en datos reales (no adivinado): el % de
+    victorias del local varia mucho entre fuentes, de 0.55 (nba) a 0.63
+    (euroleague) en las fuentes con volumen real, con fuentes pequeñas
+    (nextgen/copaespaa/tercerafeb, <=150 partidos) dando cifras poco
+    fiables (0.30-0.51 -- ruido de muestra pequeña, copaespaa es ademas
+    una copa con eliminacion directa, "local" pesa distinto ahi). Una
+    ventaja global unica sesgaria el ELO de las fuentes con ventaja real
+    distinta a la media, asi que se encoge el % de victorias del local
+    de cada fuente hacia `fallback_rate` (el global, 0.580) con
+    `k_shrink` partidos virtuales -- fuentes grandes (nba, acb...) casi
+    no se mueven de su propio numero, las pequeñas quedan casi en el
+    global. Se convierte a puntos ELO con la formula estandar (inversa
+    de la probabilidad esperada ELO): 400*log10(p/(1-p)).
+    """
+    by_source = games_ordered.groupby("source")["home_win"].agg(["sum", "size"])
+    shrunk_rate = (by_source["sum"] + k_shrink * fallback_rate) / (by_source["size"] + k_shrink)
+    elo_points = 400.0 * np.log10(shrunk_rate / (1.0 - shrunk_rate))
+    return elo_points.to_dict()
+
+
+def _replay_elo(
+    games_ordered: pd.DataFrame, k: float = ELO_K, regress_to_mean: float = ELO_REGRESS_TO_MEAN,
+) -> tuple[np.ndarray, np.ndarray, dict[tuple[str, str], float]]:
+    """Nucleo del rating ELO -- un unico paso secuencial sobre
+    `games_ordered` (una fila por partido REAL, ya ordenada por
+    [source, date_parsed, game_id], con columnas source/season/
+    home_team_id/away_team_id/home_score/away_score). Para cada
+    partido, en orden:
+    1. Registra el rating ACTUAL (antes de este partido) de local y
+       visitante en `home_pre`/`away_pre` -- lo que se devuelve como
+       feature, nunca el rating ya actualizado con el resultado de este
+       mismo partido (eso seria fuga de datos).
+    2. Si a alguno de los dos equipos le cambio la temporada desde su
+       partido anterior, regresa su rating una fraccion hacia
+       ELO_BASE (ver docstring del modulo).
+    3. Actualiza ambos ratings con el resultado real de este partido
+       (formula ELO estandar + multiplicador de margen de victoria).
+
+    Devuelve (home_pre, away_pre) -- arrays alineados con
+    `games_ordered` -- y el diccionario de ratings FINAL (tras el
+    ultimo partido de cada equipo), que es lo que necesita una
+    prediccion EN VIVO (src/predict.py) para el rating "a dia de hoy".
+    """
+    games_ordered = games_ordered.copy()
+    games_ordered["home_win"] = (games_ordered["home_score"] > games_ordered["away_score"]).astype(int)
+    home_adv_by_source = _source_home_advantage_elo(games_ordered)
+
+    elo: dict[tuple[str, str], float] = {}
+    last_season: dict[tuple[str, str], str] = {}
+    home_pre = np.empty(len(games_ordered))
+    away_pre = np.empty(len(games_ordered))
+
+    for i, row in enumerate(games_ordered.itertuples(index=False)):
+        kh, ka = (row.source, row.home_team_id), (row.source, row.away_team_id)
+        if kh not in elo:
+            elo[kh] = ELO_BASE
+        if ka not in elo:
+            elo[ka] = ELO_BASE
+        if kh in last_season and last_season[kh] != row.season:
+            elo[kh] += regress_to_mean * (ELO_BASE - elo[kh])
+        if ka in last_season and last_season[ka] != row.season:
+            elo[ka] += regress_to_mean * (ELO_BASE - elo[ka])
+        last_season[kh] = row.season
+        last_season[ka] = row.season
+
+        eh, ea = elo[kh], elo[ka]
+        home_pre[i] = eh
+        away_pre[i] = ea
+
+        home_adv = home_adv_by_source.get(row.source, 0.0)
+        expected_home = 1.0 / (1.0 + 10 ** ((ea - eh - home_adv) / 400.0))
+        actual_home = float(row.home_win)
+        margin = abs(row.home_score - row.away_score)
+        winner_elo = eh if actual_home == 1.0 else ea
+        loser_elo = ea if actual_home == 1.0 else eh
+        # Multiplicador de margen de victoria adaptado de la metodologia
+        # ELO de NBA de FiveThirtyEight -- amortigua el impacto de una
+        # diferencia de rating ya grande para que el favorito no siga
+        # inflandose por ganar "como tocaba".
+        mov_mult = ((margin + 3) ** 0.8) / (7.5 + 0.006 * (winner_elo - loser_elo))
+
+        delta = k * mov_mult * (actual_home - expected_home)
+        elo[kh] = eh + delta
+        elo[ka] = ea - delta
+
+    return home_pre, away_pre, elo
+
+
+def _one_row_per_game(team_games: pd.DataFrame) -> pd.DataFrame:
+    """Colapsa `team_games` (una fila por EQUIPO-partido, cada partido
+    real aparece dos veces) a una fila por partido REAL -- necesario
+    antes de _replay_elo() para no procesar cada partido dos veces.
+    `team_games` debe traer ya `is_home` (bool) y `date_parsed`
+    (mismo parseo que _add_pregame_rolling) añadidos por quien llama."""
+    out = team_games.loc[
+        team_games["is_home"],
+        ["source", "game_id", "season", "date_parsed", "team_id", "opp_id", "points_for", "points_against"],
+    ].rename(columns={
+        "team_id": "home_team_id", "opp_id": "away_team_id",
+        "points_for": "home_score", "points_against": "away_score",
+    })
+    return out.sort_values(["source", "date_parsed", "game_id"]).reset_index(drop=True)
+
+
+def add_elo_ratings(team_games: pd.DataFrame) -> pd.DataFrame:
+    """Añade `elo_pre` a `team_games` (rating ELO de cada equipo ANTES
+    de cada uno de sus partidos, ver _replay_elo()) -- version de
+    ENTRENAMIENTO, usada por build_pregame_game_dataset(). `team_games`
+    debe traer ya `is_home`/`date_parsed` (ver _one_row_per_game())."""
+    one_game = _one_row_per_game(team_games)
+    home_pre, away_pre, _final = _replay_elo(one_game)
+    one_game["home_elo_pre"] = home_pre
+    one_game["away_elo_pre"] = away_pre
+
+    home_side = one_game[["source", "game_id", "home_team_id", "home_elo_pre"]].rename(
+        columns={"home_team_id": "team_id", "home_elo_pre": "elo_pre"})
+    away_side = one_game[["source", "game_id", "away_team_id", "away_elo_pre"]].rename(
+        columns={"away_team_id": "team_id", "away_elo_pre": "elo_pre"})
+    elo_long = pd.concat([home_side, away_side], ignore_index=True)
+
+    return team_games.merge(elo_long, on=["source", "game_id", "team_id"], how="left")
+
+
+def current_elo_ratings(team_games: pd.DataFrame) -> dict[tuple[str, str], float]:
+    """Rating ELO ACTUAL (tras el ultimo partido jugado) de cada
+    (source, team_id) en `team_games` -- version EN VIVO, usada por
+    src/predict.py para una prediccion de un partido que todavia no se
+    ha jugado (a diferencia de add_elo_ratings(), que da el rating
+    ANTES de cada partido ya jugado). `team_games` debe traer ya
+    `is_home`/`date_parsed` (ver _one_row_per_game())."""
+    one_game = _one_row_per_game(team_games)
+    _home_pre, _away_pre, final_ratings = _replay_elo(one_game)
+    return final_ratings
+
+
 def build_pregame_game_dataset(
     conn: sqlite3.Connection,
     sources: list[str] | None = None,
@@ -256,8 +465,9 @@ def build_pregame_game_dataset(
     games_df = pd.read_sql("SELECT source, game_id, home_team_id FROM games", conn)
     pre = pre.merge(games_df, on=["source", "game_id"], how="left")
     pre["is_home"] = pre["team_id"] == pre["home_team_id"]
+    pre = add_elo_ratings(pre)
 
-    pre_cols = [f"{c}_pre" for c in ROLLING_STAT_COLS] + ["n_prior_games", "rest_days", "used_season_carryover"]
+    pre_cols = [f"{c}_pre" for c in ROLLING_STAT_COLS] + ["n_prior_games", "rest_days", "used_season_carryover", "elo_pre"]
 
     home_rename = {c: f"home_{c}" for c in pre_cols}
     home_rename["team_id"] = "home_team_id"
@@ -275,6 +485,7 @@ def build_pregame_game_dataset(
     for c in ROLLING_STAT_COLS:
         games[f"diff_{c}_pre"] = games[f"home_{c}_pre"] - games[f"away_{c}_pre"]
     games["diff_rest_days"] = games["home_rest_days"] - games["away_rest_days"]
+    games["diff_elo_pre"] = games["home_elo_pre"] - games["away_elo_pre"]
 
     home_has_info = (games["home_n_prior_games"] >= min_prior_games) | games["home_used_season_carryover"]
     away_has_info = (games["away_n_prior_games"] >= min_prior_games) | games["away_used_season_carryover"]

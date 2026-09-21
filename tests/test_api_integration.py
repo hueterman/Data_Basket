@@ -15,6 +15,7 @@ import sys
 
 import pytest
 
+import src.predict as predict_mod
 from src.pipeline.db import get_connection
 
 
@@ -109,11 +110,10 @@ def test_predict_with_real_teams(api_client):
         pred = r.get_json()
         assert r.status_code == 200
         exp = pred["shap_explanation"]
-        assert {c["feature"] for c in exp["contributions"]} == {
-            "diff_pace_40_pre", "diff_ortg_pre", "diff_drtg_pre", "diff_efg_pct_pre",
-            "diff_tov_pct_pre", "diff_orb_pct_pre", "diff_ft_rate_pre", "diff_win_pre",
-            "diff_rest_days",
-        }
+        # set(...) en vez de una lista fija a mano -- asi este test no se
+        # rompe cada vez que se añade una feature nueva (elo, AÑADIDO
+        # 2026-09-21, fue la ultima), solo si de verdad falta o sobra algo.
+        assert {c["feature"] for c in exp["contributions"]} == set(predict_mod.FEATURE_COLS)
         total = exp["base_value"] + sum(c["shap_value"] for c in exp["contributions"])
         assert total == pytest.approx(pred["home_win_probability"], abs=1e-3)
 

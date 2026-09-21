@@ -42,7 +42,8 @@ from src.features import (
     SHOT_COORD_CALIBRATION, SHOT_PRIOR_K_SHRINK, _classify_zone, build_team_game_features,
 )
 from src.features_pregame import (
-    MIN_PRIOR_SEASON_GAMES, ROLLING_STAT_COLS, SEASON_PRIOR_K_SHRINK, _add_season_carryover,
+    ELO_BASE, MIN_PRIOR_SEASON_GAMES, ROLLING_STAT_COLS, SEASON_PRIOR_K_SHRINK,
+    _add_season_carryover, current_elo_ratings,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -52,7 +53,7 @@ MODELS_DIR = PROJECT_ROOT / "models"
 # de train.py hay que cambiar los dos a la vez (no hay una unica fuente
 # de verdad automatica aqui porque train.py no expone su FEATURE_COLS
 # como algo importable sin arrastrar sus dependencias de CLI).
-FEATURE_COLS: list[str] = [f"diff_{c}_pre" for c in ROLLING_STAT_COLS] + ["diff_rest_days"]
+FEATURE_COLS: list[str] = [f"diff_{c}_pre" for c in ROLLING_STAT_COLS] + ["diff_rest_days", "diff_elo_pre"]
 
 _MODEL_FILES: dict[str, Path] = {
     "logreg": MODELS_DIR / "game_outcome_logreg.joblib",
@@ -375,6 +376,41 @@ def latest_team_features(conn: sqlite3.Connection, source: str, team_id: str) ->
     }
 
 
+def _current_elo_ratings(conn: sqlite3.Connection, source: str) -> dict[str, float]:
+    """Rating ELO ACTUAL (a dia de hoy) de cada equipo de `source`,
+    reproduciendo TODO el historial de la fuente con current_elo_ratings()
+    (src/features_pregame.py, ver su docstring y el bloque "Rating ELO
+    opponent-adjusted" para la verificacion empirica completa: roc_auc
+    0.7406 -> 0.7481 en el split cronologico de train.py) -- misma
+    formula que el entrenamiento, nunca una aproximacion distinta aqui
+    (mismo criterio que latest_team_features() con el arrastre de
+    temporada). A diferencia de latest_team_features() (que promedia
+    SOLO los partidos del propio equipo), el ELO necesita TODO el
+    historial de la fuente -- los ratings de todos los equipos estan
+    interconectados via sus rivales -- asi que se calcula una vez por
+    `source`, no por equipo; predict_game() llama a esto una sola vez y
+    reutiliza el resultado para local y visitante.
+
+    Lanza PredictionError si la fuente no tiene ningun partido jugado
+    (mismo criterio que latest_team_features())."""
+    team_games = build_team_game_features(conn, sources=[source], trainable_only=True)
+    if team_games.empty:
+        raise PredictionError(
+            f"Sin partidos jugados en source={source!r} (fuente desconocida, "
+            f"no entrenable, o sin datos ingeridos todavia)."
+        )
+    games_df = pd.read_sql(
+        "SELECT source, game_id, home_team_id FROM games WHERE source = ?", conn, params=(source,)
+    )
+    team_games = team_games.merge(games_df, on=["source", "game_id"], how="left")
+    team_games["is_home"] = team_games["team_id"] == team_games["home_team_id"]
+    team_games["date_parsed"] = pd.to_datetime(
+        team_games["date"], utc=True, format="mixed", errors="coerce"
+    )
+    final_ratings = current_elo_ratings(team_games)
+    return {team_id: rating for (src, team_id), rating in final_ratings.items()}
+
+
 def predict_game(
     conn: sqlite3.Connection,
     source: str,
@@ -399,8 +435,13 @@ def predict_game(
     home = latest_team_features(conn, source, home_team_id)
     away = latest_team_features(conn, source, away_team_id)
 
+    elo_ratings = _current_elo_ratings(conn, source)
+    home_elo = elo_ratings.get(home_team_id, ELO_BASE)
+    away_elo = elo_ratings.get(away_team_id, ELO_BASE)
+
     row = {f"diff_{col}_pre": home[col] - away[col] for col in ROLLING_STAT_COLS}
     row["diff_rest_days"] = float(home_rest_days) - float(away_rest_days)
+    row["diff_elo_pre"] = home_elo - away_elo
     X = pd.DataFrame([row], columns=FEATURE_COLS)
 
     model = load_model(model_name)
@@ -446,6 +487,14 @@ def predict_game(
         "away_games_played": away["n_games"],
         "home_used_season_carryover": home["used_season_carryover"],
         "away_used_season_carryover": away["used_season_carryover"],
+        # ELO opponent-adjusted (AÑADIDO 2026-09-21, ver _current_elo_ratings()
+        # y el bloque "Rating ELO opponent-adjusted" en
+        # src/features_pregame.py): rating ACTUAL de cada equipo, ajustado
+        # por la fuerza de TODOS los rivales a los que se ha enfrentado
+        # (no solo su propio % de victorias) -- 1500 = punto de partida
+        # de un equipo sin historial.
+        "home_elo": round(home_elo, 1),
+        "away_elo": round(away_elo, 1),
         "warnings": warnings,
         # SHAP (AÑADIDO 2026-09-21, ver _shap_contributions()): que feature
         # empujo mas esta prediccion CONCRETA hacia el local o el visitante.
