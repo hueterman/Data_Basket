@@ -198,14 +198,12 @@ cuando toque.
 
   **Solo fuentes con coordenadas de tiro CALIBRADAS y con las que el
   modelo se entreno de verdad** (`GET /model/info/shot` -> `sources`
-  dice cuales exactamente): a fecha de esta version, 4 -- `nba`,
-  `euroleague`, `eurocup`, `nextgen`. Las 7 competiciones FEB (`feb`,
+  dice cuales exactamente): a fecha de esta version, 11 -- `nba`,
+  `euroleague`, `eurocup`, `nextgen` y las 7 competiciones FEB (`feb`,
   `lfendesa`, `lfchallenge`, `lf2`, `segundafeb`, `tercerafeb`,
-  `copaespaa`) llegaron a estar calibradas y entrenadas, pero se
-  EXCLUYERON DE NUEVO el 2026-09-22 (`FEB_SHOTS_PENDING_REINGEST` en
-  `train_shot.py`) al encontrar dos bugs reales mas -- ver mas abajo.
+  `copaespaa`).
 
-  Las 7 FEB tuvieron su propio capitulo, en dos rondas:
+  Las 7 FEB tuvieron su propio capitulo, en tres rondas:
 
   1. (2026-09-20/21) Al calibrarlas se descubrieron dos bugs reales en
      `FebSource.get_shots()` (`src/scraper/feb.py`) -- `made` salia
@@ -241,13 +239,25 @@ cuando toque.
      `Jugador.aspx?i={team_id}&c={CODIGO}`) -- no habia que inventar
      nada, solo leerlos (ver "BUGS REALES corregidos 2026-09-22" en
      `FebSource.get_shots()`). Codigo corregido y verificado con tests,
-     pero las filas de `shots` YA guardadas para estas 7 fuentes siguen
+     pero las filas de `shots` YA guardadas para estas 7 fuentes seguian
      con el bug (misma razon que la ronda anterior: la cache de
      `data/raw/` guarda el Shot ya parseado) -- excluidas de nuevo de
-     `train_shot.py` hasta reingerir de verdad. **Pendiente**: el
-     usuario decide cuando lanzar `ingest_historical.py --no-cache`
-     sobre las 7 (son ~630k tiros ya ingeridos con el bug, cada uno
-     requiere golpear la API en vivo de FEB de nuevo).
+     `train_shot.py` hasta reingerir de verdad.
+  3. (2026-09-22, mismo dia) El usuario reingirio de verdad las 7 con
+     `ingest_historical.py --no-cache` (~630k tiros, cada uno requirio
+     golpear la API en vivo de FEB de nuevo). Verificado contra la base
+     de datos real tras la reingesta: `shots.team_id` de las 7 fuentes
+     matchea AL 100% contra `teams.team_id` real (186986/186986 para
+     "feb", primera union real posible), `shots.player_id` ya resuelve
+     a codigos reales de `players.player_id` (no el 100% -- `players`
+     solo guarda la plantilla ACTUAL de cada equipo via
+     `list_players()`, no el historico completo de 5 temporadas, asi
+     que jugadores de temporadas pasadas que ya no estan en el equipo
+     no aparecen alli, algo esperado y no un bug de este fix), made%
+     36.3-44.6% por fuente y FG% por zona (`zone_fg_pct()`, 629878
+     tiros utilizables) de nuevo en rango real conocido (aro 64.1%,
+     triple_arco 31.8%). Reentrenado `train_shot.py` con las 11 fuentes
+     -- ver "REINGESTA CONFIRMADA 2026-09-22" en `train_shot.py`.
 
   **Prior de jugador (añadido 2026-09-21):** antes de esto el modelo
   solo miraba la GEOMETRIA del tiro (distancia/angulo/zona/tipo/fuente)
@@ -476,13 +486,13 @@ no bloqueante.
   prior de zona) no un bug del API. No se ha comprobado ningun numero
   contra una casa de apuestas ni fuente externa (no es esa la funcion
   de esta prueba).
-  **Nota 2026-09-22:** el "modelo con 11 fuentes" de arriba (2026-09-21)
-  ya NO es el estado actual -- las 7 FEB se excluyeron de nuevo tras
+  **Nota 2026-09-22:** entre el registro de arriba (2026-09-21) y esta
+  nota, las 7 FEB pasaron por una excursion completa -- excluidas tras
   encontrar los bugs de `team_id`/`player_id` (ver "Solo fuentes con
-  coordenadas de tiro CALIBRADAS..." mas arriba); el modelo real vuelve
-  a tener 4 fuentes (`nba`/`euroleague`/`eurocup`/`nextgen`) hasta
-  reingerir. Se deja el numero antiguo tal cual para no reescribir un
-  registro historico, no porque siga siendo el estado real.
+  coordenadas de tiro CALIBRADAS..." mas arriba), reingeridas de verdad
+  por el usuario el mismo dia, verificadas contra la base de datos real
+  y reincluidas -- el modelo real vuelve a tener las 11 fuentes de
+  entonces, ya sin el bug detras.
   `GET /model/info/margin` y `predicted_margin`/`margin_model`/
   `margin_shap_explanation` en `/predict` (AÑADIDO 2026-09-22, tambien
   ejecutado de verdad contra `data/processed/basketball.db` real):
@@ -520,10 +530,21 @@ no bloqueante.
   Corregido en `FebSource.get_shots()`, con tests offline contra el
   payload real (`tests/test_feb_shots_parsing.py`, incluye el caso de
   dorsal duplicado y el de dorsal sin match en el roster). Las filas de
-  `shots` YA guardadas siguen con el bug (misma razon que la ronda
+  `shots` YA guardadas seguian con el bug (misma razon que la ronda
   anterior de bugs, la cache de `data/raw/` guarda el Shot ya parseado)
-  -- `train_shot.py` excluye de nuevo las 7 fuentes
-  (`FEB_SHOTS_PENDING_REINGEST`) hasta que se reingieran de verdad;
-  reentrenado en esta sesion para que el modelo en produccion deje de
-  usar datos con el bug mientras tanto (accuracy=0.630/AUC=0.658 con
-  solo nba/euroleague/eurocup/nextgen).
+  -- `train_shot.py` excluyo de nuevo las 7 fuentes
+  (`FEB_SHOTS_PENDING_REINGEST`) y se reentreno con solo
+  nba/euroleague/eurocup/nextgen para que el modelo en produccion
+  dejara de usar datos con el bug mientras tanto.
+
+  **Reingesta completada el mismo dia**: el usuario ejecuto
+  `ingest_historical.py --no-cache` sobre las 7 fuentes. Verificado
+  contra la base de datos real tras la reingesta: `shots.team_id`
+  matchea AL 100% contra `teams.team_id` real (186986/186986 para
+  "feb"), `shots.player_id` ya resuelve a codigos reales de
+  `players.player_id`, made% 36.3-44.6% por fuente y FG% por zona
+  (629878 tiros utilizables entre las 7) de nuevo en rango real
+  conocido (aro 64.1%, triple_arco 31.8%). `FEB_SHOTS_PENDING_REINGEST`
+  se vacio de nuevo (ver "REINGESTA CONFIRMADA 2026-09-22" en
+  `train_shot.py`) y se reentreno con las 11 fuentes
+  (accuracy=0.634/AUC=0.658).

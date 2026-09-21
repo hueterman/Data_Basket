@@ -171,6 +171,7 @@ def test_predict_shot_with_real_models(api_client, real_predict_mod):
             "sin modelo de tiro real en models/ todavia -- ejecuta 'python "
             "train_shot.py' para probar /predict_shot"
         )
+    conn = get_connection()
 
     r = api_client.get("/model/info/shot")
     assert r.status_code == 200
@@ -203,19 +204,19 @@ def test_predict_shot_with_real_models(api_client, real_predict_mod):
     assert total == pytest.approx(r_rim.get_json()["make_probability"], abs=1e-3)
 
     # "feb" (y el resto de competiciones FEB) VUELTAS A EXCLUIR
-    # 2026-09-22 (FEB_SHOTS_PENDING_REINGEST en train_shot.py) tras
-    # encontrar dos bugs reales en FebSource.get_shots() -- team_id/
-    # player_id guardaban el nombre/dorsal en vez del id real, ver "BUGS
-    # REALES corregidos 2026-09-22" en src/scraper/feb.py -- hasta que
-    # se reingieran de verdad, el modelo real no las incluye (esta
-    # calibrada en SHOT_COORD_CALIBRATION, asi que el rechazo es por
-    # "fuente no entrenada", no por "sin coordenadas calibradas": se
-    # comprueba el mensaje para no confundir los dos casos entre si).
-    r_feb_pending_reingest = api_client.post("/predict_shot", json={
+    # temporalmente 2026-09-22 (FEB_SHOTS_PENDING_REINGEST en
+    # train_shot.py) tras encontrar dos bugs reales en
+    # FebSource.get_shots() -- team_id/player_id guardaban el
+    # nombre/dorsal en vez del id real, ver "BUGS REALES corregidos
+    # 2026-09-22" en src/scraper/feb.py -- Y REINCLUIDAS el mismo dia
+    # tras la reingesta real del usuario (REINGESTA CONFIRMADA
+    # 2026-09-22 en train_shot.py: shots.team_id ya matchea al 100%
+    # contra teams.team_id real, FG% por zona en rango real conocido)
+    # -- "feb" vuelve a estar disponible.
+    r_feb_ok = api_client.post("/predict_shot", json={
         "source": "feb", "x_m": 0.5, "y_m": 1.0, "shot_type": "desconocido",
     })
-    assert r_feb_pending_reingest.status_code == 400
-    assert "no se entreno con source" in r_feb_pending_reingest.get_json()["error"]
+    assert r_feb_ok.status_code == 200
 
     r_feb_bad_type = api_client.post("/predict_shot", json={
         "source": "feb", "x_m": 1.0, "y_m": 1.0, "shot_type": "2",
@@ -227,6 +228,25 @@ def test_predict_shot_with_real_models(api_client, real_predict_mod):
     })
     assert r_uncalibrated.status_code == 400
     assert "Sin coordenadas de tiro calibradas" in r_uncalibrated.get_json()["error"]
+
+    # player_id real de una fuente FEB (AÑADIDO 2026-09-22, tras el fix
+    # de team_id/player_id): antes del fix, shots.player_id guardaba el
+    # dorsal, asi que pasar un player_id REAL nunca encontraba
+    # coincidencia (caia en silencio al prior de liga). Comprueba que
+    # ahora SI encuentra un jugador real de "feb" y su prior difiere del
+    # prior de liga generico -- no un campo decorativo tambien aqui.
+    row = conn.execute(
+        "SELECT DISTINCT player_id FROM shots WHERE source = 'feb' LIMIT 1"
+    ).fetchone()
+    if row is not None:
+        real_feb_player_id = row["player_id"]
+        r_feb_player = api_client.post("/predict_shot", json={
+            "source": "feb", "x_m": 0.3, "y_m": 0.5, "shot_type": "desconocido",
+            "player_id": real_feb_player_id,
+        })
+        assert r_feb_player.status_code == 200
+        assert r_feb_player.get_json()["player_id"] == real_feb_player_id
+    conn.close()
 
     # player_id real (Mikal Bridges, "1628969") -- el prior deberia ser
     # SU acierto real en "aro" (via _player_zone_prior(), calculado en

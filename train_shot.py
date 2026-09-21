@@ -131,14 +131,22 @@ from src.scraper.base import TRAINABLE_SOURCES
 # de team_id no afecta a ESTE script (no usa team_id como feature
 # todavia), pero SI rompe cualquier union futura (ver intento de
 # opp_drtg_pre, misma sesion, que fue como se encontro el primer bug).
-# Codigo ya corregido, pero las filas de `shots` YA guardadas para
-# estas 7 siguen con el bug (misma razon que la reingesta anterior: la
-# cache de data/raw/ guarda el Shot ya parseado, no el JSON crudo) --
-# hace falta reingerir de verdad otra vez antes de poder confiar en su
-# player_prior_fg. Se excluyen de nuevo hasta entonces.
-FEB_SHOTS_PENDING_REINGEST: set[str] = {
-    "feb", "lfendesa", "lfchallenge", "lf2", "segundafeb", "tercerafeb", "copaespaa",
-}
+#
+# REINGESTA CONFIRMADA 2026-09-22: usuario volvio a ejecutar
+# `ingest_historical.py --no-cache` sobre las 7 -- verificado en vivo
+# contra la base de datos real: shots.team_id de las 7 fuentes matchea
+# AL 100% contra teams.team_id real (186986/186986 para "feb", union
+# real por primera vez), shots.player_id ya resuelve a codigos reales
+# de players.player_id (ya no dorsales -- coincide con una fraccion
+# real de `players`, que solo guarda la plantilla ACTUAL de cada
+# equipo via list_players(), no el historico completo de 5 temporadas,
+# por eso no es el 100%), made% global 36.3-44.6% por fuente (dentro
+# de lo esperable, igual que la reingesta anterior) y FG% por zona
+# (zone_fg_pct(), 629878 tiros utilizables entre las 7) cae en rango
+# real conocido (aro 64.1%, triple_arco 31.8%, ambos dentro de
+# aro 59-68%/triple_arco 27-35%) -- ya no hay razon para seguir
+# excluyendolas.
+FEB_SHOTS_PENDING_REINGEST: set[str] = set()
 SHOT_TRAINABLE_SOURCES = sorted(
     (set(SHOT_COORD_CALIBRATION) & TRAINABLE_SOURCES) - FEB_SHOTS_PENDING_REINGEST
 )
