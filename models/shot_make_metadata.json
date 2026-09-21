@@ -10,96 +10,64 @@
     "source"
   ],
   "test_frac": 0.2,
-  "n_train": 1955826,
-  "n_test": 496376,
+  "n_train": 1454206,
+  "n_test": 368118,
   "sources": [
-    "copaespaa",
     "eurocup",
     "euroleague",
-    "feb",
-    "lf2",
-    "lfchallenge",
-    "lfendesa",
     "nba",
-    "nextgen",
-    "segundafeb",
-    "tercerafeb"
+    "nextgen"
   ],
   "metrics": {
     "baseline": {
-      "accuracy": 0.5438377359098747,
-      "log_loss": 0.6893089810917662,
+      "accuracy": 0.5296942828114898,
+      "log_loss": 0.6914035416957541,
       "roc_auc": 0.5
     },
     "logreg": {
-      "accuracy": 0.6306267829226232,
-      "log_loss": 0.6497138302037805,
-      "roc_auc": 0.6510150478188614
+      "accuracy": 0.6271630292460569,
+      "log_loss": 0.6508482033409091,
+      "roc_auc": 0.6521406922323855
     },
     "xgboost": {
-      "accuracy": 0.6334754299160313,
-      "log_loss": 0.6433651024367645,
-      "roc_auc": 0.657894624883364
+      "accuracy": 0.629863250370805,
+      "log_loss": 0.6437644830556456,
+      "roc_auc": 0.6581338254378649
     }
   },
   "sanity_check_by_zone": [
     {
       "zone": "aro",
-      "intentos": 115372,
-      "fg_pct_real": 0.679,
-      "prob_media_predicha": 0.672
+      "intentos": 94962,
+      "fg_pct_real": 0.683,
+      "prob_media_predicha": 0.68
     },
     {
       "zone": "media_larga",
-      "intentos": 74461,
-      "fg_pct_real": 0.394,
-      "prob_media_predicha": 0.406
+      "intentos": 52168,
+      "fg_pct_real": 0.423,
+      "prob_media_predicha": 0.432
     },
     {
       "zone": "pintura_corta",
-      "intentos": 104869,
-      "fg_pct_real": 0.461,
-      "prob_media_predicha": 0.462
+      "intentos": 68423,
+      "fg_pct_real": 0.459,
+      "prob_media_predicha": 0.461
     },
     {
       "zone": "triple_arco",
-      "intentos": 156464,
-      "fg_pct_real": 0.34,
-      "prob_media_predicha": 0.342
+      "intentos": 111129,
+      "fg_pct_real": 0.348,
+      "prob_media_predicha": 0.352
     },
     {
       "zone": "triple_esquina",
-      "intentos": 45210,
-      "fg_pct_real": 0.383,
-      "prob_media_predicha": 0.386
+      "intentos": 41436,
+      "fg_pct_real": 0.387,
+      "prob_media_predicha": 0.389
     }
   ],
   "league_zone_fg": [
-    {
-      "source": "copaespaa",
-      "zone": "aro",
-      "fg_pct": 0.6681715575620768
-    },
-    {
-      "source": "copaespaa",
-      "zone": "media_larga",
-      "fg_pct": 0.3348729792147806
-    },
-    {
-      "source": "copaespaa",
-      "zone": "pintura_corta",
-      "fg_pct": 0.5040650406504065
-    },
-    {
-      "source": "copaespaa",
-      "zone": "triple_arco",
-      "fg_pct": 0.34233261339092874
-    },
-    {
-      "source": "copaespaa",
-      "zone": "triple_esquina",
-      "fg_pct": 0.4716981132075472
-    },
     {
       "source": "eurocup",
       "zone": "aro",
@@ -151,106 +119,6 @@
       "fg_pct": 0.41367924528301886
     },
     {
-      "source": "feb",
-      "zone": "aro",
-      "fg_pct": 0.6808222883418988
-    },
-    {
-      "source": "feb",
-      "zone": "media_larga",
-      "fg_pct": 0.37217999019127024
-    },
-    {
-      "source": "feb",
-      "zone": "pintura_corta",
-      "fg_pct": 0.5011343283582089
-    },
-    {
-      "source": "feb",
-      "zone": "triple_arco",
-      "fg_pct": 0.3454167091112825
-    },
-    {
-      "source": "feb",
-      "zone": "triple_esquina",
-      "fg_pct": 0.3890702869908919
-    },
-    {
-      "source": "lf2",
-      "zone": "aro",
-      "fg_pct": 0.5896739130434783
-    },
-    {
-      "source": "lf2",
-      "zone": "media_larga",
-      "fg_pct": 0.2738348481918391
-    },
-    {
-      "source": "lf2",
-      "zone": "pintura_corta",
-      "fg_pct": 0.40413094310210446
-    },
-    {
-      "source": "lf2",
-      "zone": "triple_arco",
-      "fg_pct": 0.2748678519942335
-    },
-    {
-      "source": "lf2",
-      "zone": "triple_esquina",
-      "fg_pct": 0.31518987341772153
-    },
-    {
-      "source": "lfchallenge",
-      "zone": "aro",
-      "fg_pct": 0.6004166272133321
-    },
-    {
-      "source": "lfchallenge",
-      "zone": "media_larga",
-      "fg_pct": 0.3161886242100146
-    },
-    {
-      "source": "lfchallenge",
-      "zone": "pintura_corta",
-      "fg_pct": 0.4363681977831501
-    },
-    {
-      "source": "lfchallenge",
-      "zone": "triple_arco",
-      "fg_pct": 0.29437762951000807
-    },
-    {
-      "source": "lfchallenge",
-      "zone": "triple_esquina",
-      "fg_pct": 0.32693691532741664
-    },
-    {
-      "source": "lfendesa",
-      "zone": "aro",
-      "fg_pct": 0.6175250293136105
-    },
-    {
-      "source": "lfendesa",
-      "zone": "media_larga",
-      "fg_pct": 0.34190861901774
-    },
-    {
-      "source": "lfendesa",
-      "zone": "pintura_corta",
-      "fg_pct": 0.4596254148885728
-    },
-    {
-      "source": "lfendesa",
-      "zone": "triple_arco",
-      "fg_pct": 0.3150469862795513
-    },
-    {
-      "source": "lfendesa",
-      "zone": "triple_esquina",
-      "fg_pct": 0.36115142718916304
-    },
-    {
       "source": "nba",
       "zone": "aro",
       "fg_pct": 0.6562828334961568
@@ -299,56 +167,6 @@
       "source": "nextgen",
       "zone": "triple_esquina",
       "fg_pct": 0.3219557195571956
-    },
-    {
-      "source": "segundafeb",
-      "zone": "aro",
-      "fg_pct": 0.6587806677734735
-    },
-    {
-      "source": "segundafeb",
-      "zone": "media_larga",
-      "fg_pct": 0.3420697529582728
-    },
-    {
-      "source": "segundafeb",
-      "zone": "pintura_corta",
-      "fg_pct": 0.4694804982508909
-    },
-    {
-      "source": "segundafeb",
-      "zone": "triple_arco",
-      "fg_pct": 0.3102193346685555
-    },
-    {
-      "source": "segundafeb",
-      "zone": "triple_esquina",
-      "fg_pct": 0.3529029462738302
-    },
-    {
-      "source": "tercerafeb",
-      "zone": "aro",
-      "fg_pct": 0.6653696498054474
-    },
-    {
-      "source": "tercerafeb",
-      "zone": "media_larga",
-      "fg_pct": 0.25653206650831356
-    },
-    {
-      "source": "tercerafeb",
-      "zone": "pintura_corta",
-      "fg_pct": 0.40502793296089384
-    },
-    {
-      "source": "tercerafeb",
-      "zone": "triple_arco",
-      "fg_pct": 0.30434782608695654
-    },
-    {
-      "source": "tercerafeb",
-      "zone": "triple_esquina",
-      "fg_pct": 0.23931623931623933
     }
   ],
   "shot_prior_k_shrink": 20.0

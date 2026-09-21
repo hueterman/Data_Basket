@@ -198,28 +198,56 @@ cuando toque.
 
   **Solo fuentes con coordenadas de tiro CALIBRADAS y con las que el
   modelo se entreno de verdad** (`GET /model/info/shot` -> `sources`
-  dice cuales exactamente): a fecha de esta version, 11 -- `nba`,
-  `euroleague`, `eurocup`, `nextgen` y las 7 competiciones FEB (`feb`,
+  dice cuales exactamente): a fecha de esta version, 4 -- `nba`,
+  `euroleague`, `eurocup`, `nextgen`. Las 7 competiciones FEB (`feb`,
   `lfendesa`, `lfchallenge`, `lf2`, `segundafeb`, `tercerafeb`,
-  `copaespaa`), calibradas y reentrenadas en una fase posterior a la
-  primera version de este endpoint.
+  `copaespaa`) llegaron a estar calibradas y entrenadas, pero se
+  EXCLUYERON DE NUEVO el 2026-09-22 (`FEB_SHOTS_PENDING_REINGEST` en
+  `train_shot.py`) al encontrar dos bugs reales mas -- ver mas abajo.
 
-  Las 7 FEB tuvieron su propio capitulo: al calibrarlas se descubrieron
-  dos bugs reales en `FebSource.get_shots()` (`src/scraper/feb.py`) --
-  `made` salia SIEMPRE `True` (`bool("0")` es `True` en Python, "m" es
-  un string) y `shot_type` guardaba el reloj del partido, no el tipo de
-  tiro (la API de FEB no reporta eso por tiro suelto, a diferencia de
-  NBA/Euroliga). Corregido, verificado en vivo contra un boxscore real
-  (FGM/FGA exactos), y reingerido de verdad por el usuario
-  (`ingest_historical.py --no-cache`, necesario porque la cache de
-  `data/raw/` guardaba el dato ya mal parseado) antes de reentrenar --
-  ver el aviso "REINGESTA CONFIRMADA 2026-09-21" en `train_shot.py`.
-  Como su API no reporta un tipo de tiro real por tiro suelto, se
-  entrenaron con `shot_type="desconocido"` fijo, y `/predict_shot`
-  rechaza con un 400 cualquier `"2"`/`"3"` para estas 7 fuentes en vez
-  de dejar que el modelo generalice sobre una categoria que nunca vio
-  en ese contexto (ver `SOURCES_WITHOUT_REPORTED_SHOT_TYPE` en
-  `src/predict.py`).
+  Las 7 FEB tuvieron su propio capitulo, en dos rondas:
+
+  1. (2026-09-20/21) Al calibrarlas se descubrieron dos bugs reales en
+     `FebSource.get_shots()` (`src/scraper/feb.py`) -- `made` salia
+     SIEMPRE `True` (`bool("0")` es `True` en Python, "m" es un string)
+     y `shot_type` guardaba el reloj del partido, no el tipo de tiro
+     (la API de FEB no reporta eso por tiro suelto, a diferencia de
+     NBA/Euroliga). Corregido, verificado en vivo contra un boxscore
+     real (FGM/FGA exactos), y reingerido de verdad por el usuario
+     (`ingest_historical.py --no-cache`, necesario porque la cache de
+     `data/raw/` guardaba el dato ya mal parseado) antes de reentrenar
+     -- ver el aviso "REINGESTA CONFIRMADA 2026-09-21" en
+     `train_shot.py`. Como su API no reporta un tipo de tiro real por
+     tiro suelto, se entrenaron con `shot_type="desconocido"` fijo, y
+     `/predict_shot` rechaza con un 400 cualquier `"2"`/`"3"` para
+     estas 7 fuentes en vez de dejar que el modelo generalice sobre una
+     categoria que nunca vio en ese contexto (ver
+     `SOURCES_WITHOUT_REPORTED_SHOT_TYPE` en `src/predict.py`).
+  2. (2026-09-22) Al retomar el bug ya conocido de `shots.team_id`
+     (guardaba el NOMBRE del equipo en vez de su ID numerico real, sin
+     afectar todavia a ninguna feature en uso) se verifico en vivo por
+     primera vez un payload REAL completo del ShotChart API (navegador
+     integrado, `fetch()` autenticado contra game_id=2220021, 120/120
+     tiros comprobados) y aparecio un SEGUNDO bug, mas grave: `player`
+     en cada tiro NO es el id real del jugador -- es su DORSAL (el
+     mismo dorsal se repite entre equipos, confirmado con un caso real:
+     "no"="22" son dos jugadores distintos en los dos equipos del
+     partido de prueba). Esto SI afectaba a una feature en produccion:
+     `add_shot_priors()` agrupa por `(source, player_id)`, asi que el
+     prior de jugador de estas 7 fuentes mezclaba el historial de
+     jugadores DISTINTOS que compartieron dorsal en partidos distintos.
+     El payload SI trae los IDs reales (`TEAM[i].id`, el mismo de
+     `Equipo.aspx?i=`; `TEAM[i].PLAYER[].id`, el mismo de
+     `Jugador.aspx?i={team_id}&c={CODIGO}`) -- no habia que inventar
+     nada, solo leerlos (ver "BUGS REALES corregidos 2026-09-22" en
+     `FebSource.get_shots()`). Codigo corregido y verificado con tests,
+     pero las filas de `shots` YA guardadas para estas 7 fuentes siguen
+     con el bug (misma razon que la ronda anterior: la cache de
+     `data/raw/` guarda el Shot ya parseado) -- excluidas de nuevo de
+     `train_shot.py` hasta reingerir de verdad. **Pendiente**: el
+     usuario decide cuando lanzar `ingest_historical.py --no-cache`
+     sobre las 7 (son ~630k tiros ya ingeridos con el bug, cada uno
+     requiere golpear la API en vivo de FEB de nuevo).
 
   **Prior de jugador (añadido 2026-09-21):** antes de esto el modelo
   solo miraba la GEOMETRIA del tiro (distancia/angulo/zona/tipo/fuente)
@@ -448,6 +476,13 @@ no bloqueante.
   prior de zona) no un bug del API. No se ha comprobado ningun numero
   contra una casa de apuestas ni fuente externa (no es esa la funcion
   de esta prueba).
+  **Nota 2026-09-22:** el "modelo con 11 fuentes" de arriba (2026-09-21)
+  ya NO es el estado actual -- las 7 FEB se excluyeron de nuevo tras
+  encontrar los bugs de `team_id`/`player_id` (ver "Solo fuentes con
+  coordenadas de tiro CALIBRADAS..." mas arriba); el modelo real vuelve
+  a tener 4 fuentes (`nba`/`euroleague`/`eurocup`/`nextgen`) hasta
+  reingerir. Se deja el numero antiguo tal cual para no reescribir un
+  registro historico, no porque siga siendo el estado real.
   `GET /model/info/margin` y `predicted_margin`/`margin_model`/
   `margin_shap_explanation` en `/predict` (AÑADIDO 2026-09-22, tambien
   ejecutado de verdad contra `data/processed/basketball.db` real):
@@ -467,3 +502,28 @@ no bloqueante.
   verifico con `zone_fg_pct()` que el FG% por zona cae en rango
   conocido (aro 59-68%, triple_arco 27-35% en las 7 competiciones) antes
   de reentrenar `train_shot.py` con ellas.
+- **Bug de `team_id`/`player_id` en `FebSource.get_shots()`** (sesion
+  2026-09-22, retomado tras dejarlo pendiente en una sesion anterior):
+  verificado en vivo por primera vez un payload REAL completo del
+  ShotChart API (navegador integrado, `fetch()` autenticado, 120/120
+  tiros de game_id=2220021 comprobados uno a uno contra el roster real
+  de cada equipo) -- `shots.team_id` guardaba el nombre del equipo
+  (`team["name"]`) en vez de su id numerico real (`team["id"]`, SI
+  presente en el payload, identico al de `Equipo.aspx?i=`), y
+  `shots.player_id` guardaba el DORSAL del tiro (`shot["player"]`) en
+  vez del id real del jugador (`team["PLAYER"][].id`, resuelto contra
+  `team["PLAYER"][].no`) -- confirmado con un caso real de dorsal
+  duplicado entre los dos equipos del partido de prueba (dos jugadores
+  DISTINTOS, mismo dorsal "22"). El segundo bug corrompia
+  `player_prior_fg` (agrupa por `(source, player_id)`, ver
+  `add_shot_priors()` en `src/features.py`) para las 7 fuentes FEB.
+  Corregido en `FebSource.get_shots()`, con tests offline contra el
+  payload real (`tests/test_feb_shots_parsing.py`, incluye el caso de
+  dorsal duplicado y el de dorsal sin match en el roster). Las filas de
+  `shots` YA guardadas siguen con el bug (misma razon que la ronda
+  anterior de bugs, la cache de `data/raw/` guarda el Shot ya parseado)
+  -- `train_shot.py` excluye de nuevo las 7 fuentes
+  (`FEB_SHOTS_PENDING_REINGEST`) hasta que se reingieran de verdad;
+  reentrenado en esta sesion para que el modelo en produccion deje de
+  usar datos con el bug mientras tanto (accuracy=0.630/AUC=0.658 con
+  solo nba/euroleague/eurocup/nextgen).

@@ -103,13 +103,19 @@ Endpoints:
         docstring de src/predict.py:shot_make_probability()). SOLO
         fuentes con coordenadas de tiro calibradas Y con las que se
         entreno de verdad el modelo -- GET /model/info/shot dice cuales
-        son ahora mismo (11 a fecha de esta version: nba, euroleague,
-        eurocup, nextgen, feb, lfendesa, lfchallenge, lf2, segundafeb,
-        tercerafeb, copaespaa). Para las 7 competiciones FEB, `shot_type`
-        debe ser "desconocido" en vez de "2"/"3" -- su fuente no reporta
-        el tipo real por tiro suelto (ver SOURCES_WITHOUT_REPORTED_SHOT_
-        TYPE en src/predict.py). `player_id` (mismo id real que la
-        columna player_id de `shots`/`players`, ver GET /teams o la app
+        son ahora mismo. Las 7 competiciones FEB (feb, lfendesa,
+        lfchallenge, lf2, segundafeb, tercerafeb, copaespaa) estan
+        EXCLUIDAS temporalmente (FEB_SHOTS_PENDING_REINGEST en
+        train_shot.py, AÑADIDO 2026-09-22) tras encontrar dos bugs
+        reales en FebSource.get_shots() -- team_id/player_id guardaban
+        el nombre/dorsal en vez del id real -- hasta que se reingieran
+        de verdad; mientras tanto solo nba/euroleague/eurocup/nextgen.
+        Cuando vuelvan a estar disponibles, `shot_type` debe ser
+        "desconocido" en vez de "2"/"3" para ellas -- su fuente no
+        reporta el tipo real por tiro suelto (ver
+        SOURCES_WITHOUT_REPORTED_SHOT_TYPE en src/predict.py).
+        `player_id` (mismo id real que la columna player_id de
+        `shots`/`players`, ver GET /teams o la app
         de exploracion): si se pasa, la prediccion usa el acierto
         historico REAL de ese jugador en la zona del tiro en vez del
         acierto medio de liga -- ver _player_zone_prior() en

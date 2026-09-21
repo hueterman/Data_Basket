@@ -431,23 +431,36 @@ CONFIRMADO EN VIVO que la autenticacion se acepta: una llamada real
 con el token devuelve 404 "Not Found" (no 401/403) para un partido
 sin jugar -- es decir, el fallo es "no hay datos para este partido
 ahora mismo" (LiveStats.API parece servir solo partidos en juego o
-recien terminados), no un fallo de credenciales. El CONTENIDO real
-de la respuesta para un partido con tiros de verdad NO se ha podido
-observar todavia (cero partidos jugados en toda la FEB a fecha de
-esta sesion, ver mas abajo) -- el parseo sigue el esquema EXACTO que
-consume el propio `ShotChart.js` del sitio (confirmado leyendo su
-codigo fuente completo, no adivinado):
+recien terminados), no un fallo de credenciales.
 
-    json.SHOTCHART.TEAM[0/1] = {name, PLAYER: [{name, no}, ...]}
-    json.SHOTCHART.SHOTS[]   = [{team: 0|1, player, quarter, x, y, m, t}, ...]
+CONTENIDO real de la respuesta CONFIRMADO EN VIVO 2026-09-22 (antes
+solo se conocia por leer `ShotChart.js`, nunca se habia observado un
+payload real completo -- ver "BUGS REALES corregidos 2026-09-22" en
+get_shots() mas abajo, encontrados precisamente al hacer esta
+verificacion) contra game_id=2220021 (Palmer Alma Mediterrania Palma -
+Melilla Sport Capital) via `fetch()` autenticado desde el navegador
+integrado:
 
-`m` se mapea a `Shot.made` (nombre de variable "made" en el codigo
-fuente real del sitio, `shoot.m`); `t` se guarda tal cual en
+    json.SHOTCHART.TEAM[0/1] = {id, name, clubCode, logo, teamCode,
+                                 PLAYER: [{id, no, name, <stats agregadas
+                                 del partido: pts/reb/ast/fga/fgm/...>}, ...]}
+    json.SHOTCHART.SHOTS[]   = [{team: "0"|"1", player: "<dorsal>",
+                                 quarter, x, y, m, t}, ...]
+
+`TEAM[i].id` es el mismo ID numerico real que `Equipo.aspx?i=` (el que
+usan `games`/`team_stats`/`players`) -- confirmado identico al de la
+pagina Partido.aspx del mismo partido. `TEAM[i].PLAYER[].id` es el
+mismo codigo real que `Jugador.aspx?i={team_id}&c={CODIGO}` que ya usan
+list_players()/get_boxscore(). `SHOTS[].player` NO es ese id -- es el
+DORSAL del jugador (el campo "no" de PLAYER[], confirmado cruzando los
+120 tiros reales del partido de prueba contra el roster de cada
+equipo, 0 discrepancias), asi que hay que resolverlo contra
+`TEAM[team_index].PLAYER[]` para recuperar el id real (ver
+get_shots()). `m` se mapea a `Shot.made` (nombre de variable "made" en
+el codigo fuente real del sitio, `shoot.m`); `t` se guarda tal cual en
 `shot_type` porque su significado exacto no esta confirmado (el
-codigo fuente no lo interpreta, solo lo reenvia). Esta pieza en
-concreto (el CONTENIDO de una respuesta real, no el endpoint ni el
-esquema) queda pendiente de verificar en cuanto haya un partido con
-grafico de tiro real.
+codigo fuente no lo interpreta, solo lo reenvia) -- confirmado que NO
+es el tipo de tiro real (ver "BUGS REALES corregidos 2026-09-20(e)").
 
 Nota adicional (no explotada todavia, solo documentada): el mismo
 `widget.launcher.js` revela que TAMBIEN existe un API "Directo" con
@@ -1310,13 +1323,77 @@ class FebSource:
                 f"ejemplo real, ver docstring del modulo)."
             )
 
+        # BUGS REALES corregidos 2026-09-22, encontrados y verificados en
+        # vivo (navegador integrado, fetch() autenticado contra el
+        # ShotChart API real de game_id=2220021, 120/120 tiros
+        # comprobados) al retomar el bug ya documentado de mas abajo
+        # ("no adivinar" -- se corrigen los dos juntos porque el segundo
+        # solo se vio AL verificar el primero contra un payload real
+        # completo, nunca observado hasta ahora pese a que get_shots()
+        # ya lleva desde 2026-09-20 en produccion):
+        #
+        # 1. `team_id`: el codigo anterior usaba team.get("name") (un
+        #    STRING con el nombre completo del equipo) como si fuera el
+        #    ID -- la respuesta real SI trae un `team["id"]` numerico
+        #    (p. ej. "858102"), confirmado IDENTICO al ID real que
+        #    devuelve Equipo.aspx?i= para ese mismo equipo (el mismo
+        #    usado en `games`/`team_stats`/`players`) -- no habia que
+        #    inventar nada, el dato ya estaba en el payload, solo no se
+        #    leia. Esto rompia CUALQUIER union entre `shots` y el resto
+        #    de tablas por team_id para las 7 competiciones FEB (~630k
+        #    filas), nunca detectado porque ninguna feature existente lo
+        #    necesitaba todavia (ver intento de opp_drtg_pre, sesion
+        #    2026-09-22, que SI lo descubrio).
+        # 2. `player_id`: el codigo anterior usaba raw_shot.get("player")
+        #    directamente como ID -- ese campo es en realidad el DORSAL
+        #    del jugador ("no" en PLAYER[], no su id real), confirmado
+        #    cruzando los 120 tiros reales contra el roster de cada
+        #    equipo (0 discrepancias) y viendo que el mismo dorsal ("22")
+        #    aparece en AMBOS equipos con jugadores distintos. El id real
+        #    SI esta en el payload (`TEAM[i].PLAYER[].id`, el mismo
+        #    codigo de Jugador.aspx?i={team_id}&c={CODIGO} que ya usan
+        #    list_players()/get_boxscore()) -- se resuelve el dorsal de
+        #    cada tiro contra el roster de SU equipo (nunca global, el
+        #    mismo dorsal se repite entre equipos) para recuperarlo. Esto
+        #    corrompia el prior de jugador del modelo de tiro
+        #    (`player_prior_fg`/`add_shot_priors()` en src/features.py,
+        #    agrupa por (source, player_id)) para las 7 fuentes FEB --
+        #    mezclaba el historial de jugadores DISTINTOS que compartieron
+        #    dorsal en partidos distintos bajo un mismo "player_id"
+        #    sintetico, y ademas hacia que pasar un player_id real a
+        #    /predict_shot nunca encontrara coincidencia para estas 7
+        #    fuentes (silenciosamente caia al prior de liga, sin error).
+        #
+        # Las filas YA guardadas en `shots` para estas 7 competiciones
+        # tienen el mismo problema que el bug de made/shot_type de mas
+        # abajo -- no se pueden arreglar con una migracion (la cache de
+        # data/raw/ guarda el Shot ya parseado con el bug), hace falta
+        # reingerir de verdad. Ver FEB_SHOTS_PENDING_REINGEST en
+        # train_shot.py, vuelto a marcar con las 7 fuentes.
         raw_teams = shotchart.get("TEAM") or []
         team_ids: list[str] = []
+        roster_by_dorsal: list[dict[str, str]] = []
         for idx, team in enumerate(raw_teams[:2]):
+            team_id_real = team.get("id") if isinstance(team, dict) else None
             name = team.get("name") if isinstance(team, dict) else None
-            team_ids.append(str(name) if name else f"equipo-{idx}")
+            # Mismo criterio de respaldo que el resto del modulo (ver
+            # docstring, "IDs usados en este modulo"): slug del nombre
+            # si el id real no viniera por algun motivo.
+            team_ids.append(str(team_id_real) if team_id_real else (_slugify(name) if name else f"equipo-{idx}"))
+
+            roster: dict[str, str] = {}
+            raw_players = team.get("PLAYER") if isinstance(team, dict) else None
+            for player in raw_players or []:
+                if not isinstance(player, dict):
+                    continue
+                dorsal = player.get("no")
+                player_id_real = player.get("id")
+                if dorsal is not None and player_id_real:
+                    roster[str(dorsal)] = str(player_id_real)
+            roster_by_dorsal.append(roster)
         while len(team_ids) < 2:
             team_ids.append(f"equipo-{len(team_ids)}")
+            roster_by_dorsal.append({})
 
         shots: list[Shot] = []
         for raw_shot in shotchart.get("SHOTS") or []:
@@ -1324,10 +1401,18 @@ class FebSource:
                 continue
             team_index = _to_int(raw_shot.get("team"), default=0)
             team_id = team_ids[team_index] if 0 <= team_index < len(team_ids) else str(team_index)
+            roster = roster_by_dorsal[team_index] if 0 <= team_index < len(roster_by_dorsal) else {}
+            dorsal = str(raw_shot.get("player", ""))
+            # Respaldo si el dorsal no aparece en el roster de su equipo
+            # (jugador dado de baja a mitad de temporada, error puntual
+            # de la API...) -- mismo patron sintetico "{team_id}-{dorsal}"
+            # que list_players()/get_boxscore() usan cuando falta el
+            # codigo numerico real, nunca un player_id vacio silencioso.
+            player_id = roster.get(dorsal) or f"{team_id}-{dorsal}"
             shots.append(
                 Shot(
                     game_id=game_id,
-                    player_id=str(raw_shot.get("player", "")),
+                    player_id=player_id,
                     team_id=team_id,
                     loc_x=float(raw_shot.get("x") or 0),
                     loc_y=float(raw_shot.get("y") or 0),

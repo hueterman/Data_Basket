@@ -202,10 +202,20 @@ def test_predict_shot_with_real_models(api_client, real_predict_mod):
     total = exp["base_value"] + sum(c["shap_value"] for c in exp["contributions"])
     assert total == pytest.approx(r_rim.get_json()["make_probability"], abs=1e-3)
 
-    r_feb_ok = api_client.post("/predict_shot", json={
+    # "feb" (y el resto de competiciones FEB) VUELTAS A EXCLUIR
+    # 2026-09-22 (FEB_SHOTS_PENDING_REINGEST en train_shot.py) tras
+    # encontrar dos bugs reales en FebSource.get_shots() -- team_id/
+    # player_id guardaban el nombre/dorsal en vez del id real, ver "BUGS
+    # REALES corregidos 2026-09-22" en src/scraper/feb.py -- hasta que
+    # se reingieran de verdad, el modelo real no las incluye (esta
+    # calibrada en SHOT_COORD_CALIBRATION, asi que el rechazo es por
+    # "fuente no entrenada", no por "sin coordenadas calibradas": se
+    # comprueba el mensaje para no confundir los dos casos entre si).
+    r_feb_pending_reingest = api_client.post("/predict_shot", json={
         "source": "feb", "x_m": 0.5, "y_m": 1.0, "shot_type": "desconocido",
     })
-    assert r_feb_ok.status_code == 200
+    assert r_feb_pending_reingest.status_code == 400
+    assert "no se entreno con source" in r_feb_pending_reingest.get_json()["error"]
 
     r_feb_bad_type = api_client.post("/predict_shot", json={
         "source": "feb", "x_m": 1.0, "y_m": 1.0, "shot_type": "2",
@@ -216,6 +226,7 @@ def test_predict_shot_with_real_models(api_client, real_predict_mod):
         "source": "acb", "x_m": 1.0, "y_m": 1.0, "shot_type": "2",
     })
     assert r_uncalibrated.status_code == 400
+    assert "Sin coordenadas de tiro calibradas" in r_uncalibrated.get_json()["error"]
 
     # player_id real (Mikal Bridges, "1628969") -- el prior deberia ser
     # SU acierto real en "aro" (via _player_zone_prior(), calculado en

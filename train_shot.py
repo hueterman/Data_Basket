@@ -116,11 +116,29 @@ from src.scraper.base import TRAINABLE_SOURCES
 # zona con datos reales (zone_fg_pct()) cae en el rango real conocido
 # (aro 59-68%, triple_arco 27-35%, ver docstring de zone_fg_pct() en
 # features.py) -- ya no hay razon para seguir excluyendolas.
-# FEB_SHOTS_PENDING_REINGEST se deja vacio (no se borra la constante,
-# por si aparece otra fuente en la misma situacion mas adelante) en vez
-# de borrar toda esta logica -- mismo patron defensivo, minimiza el
-# diff si hay que volver a excluir algo.
-FEB_SHOTS_PENDING_REINGEST: set[str] = set()
+#
+# VUELTAS A EXCLUIR 2026-09-22 -- DOS BUGS REALES NUEVOS encontrados al
+# retomar este mismo asunto (ver "BUGS REALES corregidos 2026-09-22" en
+# FebSource.get_shots(), src/scraper/feb.py, verificados en vivo contra
+# un payload real completo, 120/120 tiros comprobados): `shots.team_id`
+# guardaba el NOMBRE del equipo en vez de su ID numerico real, y
+# `shots.player_id` guardaba el DORSAL del jugador en vez de su id real
+# -- este segundo SI afecta a este script: `add_shot_priors()` agrupa
+# por (source, player_id), asi que para estas 7 fuentes el prior de
+# jugador mezclaba el historial de jugadores DISTINTOS que compartieron
+# dorsal en partidos distintos bajo un mismo "player_id" sintetico (un
+# dorsal se repite tanto entre equipos como entre temporadas). El bug
+# de team_id no afecta a ESTE script (no usa team_id como feature
+# todavia), pero SI rompe cualquier union futura (ver intento de
+# opp_drtg_pre, misma sesion, que fue como se encontro el primer bug).
+# Codigo ya corregido, pero las filas de `shots` YA guardadas para
+# estas 7 siguen con el bug (misma razon que la reingesta anterior: la
+# cache de data/raw/ guarda el Shot ya parseado, no el JSON crudo) --
+# hace falta reingerir de verdad otra vez antes de poder confiar en su
+# player_prior_fg. Se excluyen de nuevo hasta entonces.
+FEB_SHOTS_PENDING_REINGEST: set[str] = {
+    "feb", "lfendesa", "lfchallenge", "lf2", "segundafeb", "tercerafeb", "copaespaa",
+}
 SHOT_TRAINABLE_SOURCES = sorted(
     (set(SHOT_COORD_CALIBRATION) & TRAINABLE_SOURCES) - FEB_SHOTS_PENDING_REINGEST
 )
