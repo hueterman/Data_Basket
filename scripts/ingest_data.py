@@ -54,6 +54,14 @@ Un fallo real en UNA fuente (incluido un 429/RateLimitedError) NO para
 las demas -- se avisa y se sigue con la siguiente. Ver el resumen final
 para saber que fuentes terminaron bien y cuales no.
 
+AÑADIDO 2026-09-21: cada ejecucion sobreescribe
+logs/ingest_current_seasons/last_run_summary.json con que fuentes
+fueron OK y cuales fallaron (y por que) -- pensado para que un
+scheduled task de Claude con acceso a este equipo (sin salida de red
+real, pero SI puede leer ficheros locales) pueda avisar por
+push/email si algo fallo, en vez de que un scrape roto pase
+desapercibido hasta que alguien mira la consola a mano.
+
 AÑADIDO 2026-09-20(f): `--no-cache` fuerza rescrapear de verdad en vez
 de reutilizar lo que ya haya en data/raw/ -- necesario, por ejemplo,
 tras arreglar un bug de parseo real como el de FebSource.get_shots()
@@ -73,8 +81,10 @@ Uso:
 """
 from __future__ import annotations
 
+import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -225,6 +235,28 @@ def main() -> None:
         print(f"  FALLO {name}: {reason}")
     if not results and not failed:
         print("  (nada que ingerir -- revisa --sources)")
+
+    # Resumen maquina-legible del run (ver docstring del modulo,
+    # AÑADIDO 2026-09-21) -- SIEMPRE se sobreescribe, tambien en un run
+    # manual/ad-hoc, asi que refleja el ultimo run de este script sea
+    # cual sea. Nunca lanza si falla al escribir (best-effort, no debe
+    # tumbar una ingesta que por lo demas fue bien).
+    try:
+        summary_dir = Path(__file__).resolve().parent.parent / "logs" / "ingest_current_seasons"
+        summary_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = summary_dir / "last_run_summary.json"
+        summary_path.write_text(
+            json.dumps({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "sources_requested": args["sources"],
+                "no_cache": not args["use_cache"],
+                "ok": {name: str(summary) for name, summary in results.items()},
+                "failed": failed,
+            }, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        print(f"\n  (no se pudo escribir el resumen JSON en {summary_dir} -> {exc})")
 
 
 if __name__ == "__main__":
