@@ -20,15 +20,24 @@ explicito (400/404), nunca un 500 silencioso (ver PredictionError en
 src/predict.py).
 
 Uso:
-    pip install -r requirements.txt   # ya incluye flask
+    pip install -r requirements.txt   # ya incluye flask y waitress
     python api/app.py
-    -> escucha en http://127.0.0.1:5060
+    -> escucha en http://127.0.0.1:5060 (servidor de desarrollo de
+       Flask, con el depurador interactivo activo -- SOLO localhost,
+       nunca lo expongas a internet asi)
 
     Puerto configurable sin tocar el codigo con la variable de entorno
     PORT, igual que app/app.py:
         PORT=5061 python api/app.py            (Linux/Mac)
         set PORT=5061 && python api/app.py     (Windows cmd)
         $env:PORT=5061; python api/app.py      (PowerShell)
+
+    PRODUCTION=1 sirve con waitress en vez del servidor de desarrollo
+    (sin el depurador interactivo, seguro para exponer con un tunel
+    tipo ngrok/cloudflared en una demo puntual) -- ver "Despliegue para
+    demos" en api/README.md para el flujo completo:
+        set PRODUCTION=1 && python api\app.py       (Windows cmd)
+        $env:PRODUCTION=1; python api\app.py        (PowerShell)
 
 Endpoints:
     GET  /health
@@ -234,4 +243,22 @@ def predict_shot():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5060))
-    app.run(debug=True, port=port)
+    # PRODUCTION=1 (AÑADIDO 2026-09-21, ver "Despliegue para demos" en
+    # api/README.md): sirve con waitress (servidor WSGI de verdad, puro
+    # Python, funciona en Windows sin compilador a diferencia de
+    # gunicorn) en vez del servidor de desarrollo de Flask. IMPORTANTE
+    # por seguridad, no solo por rendimiento: app.run(debug=True) deja
+    # activo el depurador interactivo de Werkzeug, que permite EJECUTAR
+    # CODIGO ARBITRARIO desde el navegador en cualquier pagina de error
+    # -- aceptable en localhost, un riesgo real en cuanto el puerto se
+    # expone a internet (p. ej. con un tunel ngrok/cloudflared para
+    # enseñar el API). Por defecto (sin PRODUCTION=1) el comportamiento
+    # NO cambia -- sigue siendo el servidor de desarrollo con debug=True,
+    # para no romper el flujo de trabajo local habitual.
+    if os.environ.get("PRODUCTION") == "1":
+        from waitress import serve
+        print(f"Sirviendo con waitress (modo produccion/demo, SIN depurador) en "
+              f"http://0.0.0.0:{port}")
+        serve(app, host="0.0.0.0", port=port)
+    else:
+        app.run(debug=True, port=port)

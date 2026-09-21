@@ -28,6 +28,9 @@ joblib
 
 # --- Servicio ---
 flask
+waitress  # servidor WSGI real para PRODUCTION=1 en api/app.py -- puro Python,
+          # funciona en Windows sin compilador (a diferencia de gunicorn), sin
+          # el depurador interactivo de Werkzeug que trae el server de Flask
 streamlit
 
 # --- Orquestacion (opcional, fase 7 -- descomentar si hace falta) ---

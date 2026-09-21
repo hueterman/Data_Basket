@@ -30,6 +30,71 @@ Escucha en <http://127.0.0.1:5060>. Puerto configurable sin tocar el
 codigo con la variable de entorno `PORT` (p. ej. `PORT=5061 python
 api/app.py`), igual que `app/app.py`.
 
+## Despliegue para demos (sin hosting fijo todavia)
+
+Punto #5 del roadmap: por ahora solo hace falta poder ENSEÑAR el API
+funcionando (una entrevista, una entrega...), no tenerlo corriendo
+24/7 -- la fase de despliegue real en un hosting de pago queda para
+mas adelante. Con `data/processed/basketball.db` pesando ~284MB, la
+mayoria de hostings gratuitos con disco efimero quedan descartados de
+entrada para un despliegue permanente; para una demo puntual no hace
+falta subir la base de datos a ningun sitio -- se sirve desde tu propio
+equipo y se abre un tunel temporal hacia internet.
+
+**Paso 1 -- levantar el API en modo produccion (sin el depurador de
+Flask activo, IMPORTANTE antes de exponerlo a internet):**
+```
+pip install -r requirements.txt   # ya incluye waitress
+
+set PRODUCTION=1                  (Windows cmd)
+python api\app.py
+
+$env:PRODUCTION=1                 (PowerShell)
+python api\app.py
+```
+Sirve con `waitress` en <http://127.0.0.1:5060> (o el puerto que
+marques con `PORT`). `debug=True` (el modo por defecto sin
+`PRODUCTION=1`) deja activo el depurador interactivo de Werkzeug, que
+permite ejecutar codigo arbitrario desde el navegador en cualquier
+pagina de error -- inofensivo en localhost, un riesgo real en cuanto el
+puerto se expone a internet con un tunel. Nunca uses el modo por
+defecto para esto.
+
+**Paso 2 -- abrir un tunel temporal hacia ese puerto.** Dos opciones,
+ninguna sube la base de datos a ningun sitio (el tunel solo reenvia
+peticiones HTTP a tu proceso local):
+- **Cloudflare Quick Tunnel** (`cloudflared`) -- no requiere cuenta ni
+  registro, un solo comando:
+  ```
+  cloudflared tunnel --url http://localhost:5060
+  ```
+  Imprime una URL publica `https://algo-aleatorio.trycloudflare.com`
+  que reenvia a tu API mientras el comando siga corriendo.
+- **ngrok** -- requiere crear una cuenta gratuita y configurar un
+  authtoken una vez (`ngrok config add-authtoken ...`), luego:
+  ```
+  ngrok http 5060
+  ```
+  Tambien imprime una URL publica temporal (plan gratuito: cambia cada
+  vez que reinicias el tunel).
+
+**Paso 3 -- enseñarlo:** comparte la URL publica que te de el tunel
+(p. ej. `https://algo.trycloudflare.com/health` para comprobar que
+responde, o `https://algo.trycloudflare.com/predict_shot` con un
+cliente HTTP) mientras dure la demo, y **cierra el tunel al terminar**
+(Ctrl+C) -- mientras este abierto, tu API (de solo lectura, pero con
+toda la base de datos detras) es alcanzable por cualquiera que tenga
+la URL.
+
+**Para cuando llegue el despliegue real (mas adelante, fuera de
+alcance de esta fase):** el bloqueo principal sera el tamaño de
+`basketball.db` (~284MB) -- las opciones son un hosting con disco
+persistente de pago (Render/Railway/Fly.io, unos pocos euros/mes) o
+recortar que fuentes viajan a produccion (p. ej. servir solo con las
+fuentes de mas volumen/interes en vez de las 11 completas). No se ha
+tomado ninguna decision todavia sobre esto -- pendiente de discutir
+cuando toque.
+
 ## Endpoints
 
 - `GET /health` -- `{"status": "ok"}`, para comprobar que el proceso
