@@ -1224,13 +1224,54 @@ class FebSource:
     def get_shots(self, game_id: str) -> list[Shot]:
         """Coordenadas de tiro reales via el API interno "Directo" que
         usa la pestaña "Grafico de tiro" de la ficha de partido --
-        endpoint, autenticacion y esquema de respuesta confirmados en
-        vivo (ver docstring del modulo para el detalle completo). El
-        CONTENIDO de una respuesta real con tiros NO se ha podido
-        observar todavia (cero partidos jugados en toda la FEB a
-        fecha de esta sesion) -- el parseo de abajo sigue el esquema
-        exacto que consume el propio ShotChart.js del sitio, pero
-        queda sin verificar contra un ejemplo real."""
+        endpoint y autenticacion confirmados en vivo (ver docstring del
+        modulo).
+
+        BUGS REALES corregidos 2026-09-20(e), encontrados al preparar la
+        calibracion de coordenadas (ver SHOT_COORD_CALIBRATION en
+        src/features.py) -- verificado en vivo contra game_id=2220021
+        (Palmer Alma Mediterrania Palma - Melilla Sport Capital), esquema
+        real de cada tiro: {"m": "0"|"1", "t": "MM:SS", "x": ..., "y":
+        ..., "team": "0"|"1", "player": "...", "quarter": "..."}:
+
+        1. `made`: el codigo anterior hacia `bool(raw_shot.get("m"))` --
+           "m" es un STRING ("0" o "1"), y `bool("0")` en Python es
+           `True` (cualquier string no vacio lo es) -- por eso TODOS los
+           tiros guardados hasta ahora de las 7 competiciones FEB salian
+           made=True sin excepcion (confirmado: 100% made=1 en las
+           186986/147499/... filas ya guardadas en `shots`). Arreglado
+           comparando contra el string "1" explicitamente. Verificado
+           contra el boxscore real del partido de prueba: contando
+           m=="1" por equipo (24 y 27) contra fgm real de las plantillas
+           (24 y 27) y el total de tiros por equipo (64 y 56) contra fga
+           real (64 y 56) -- coincidencia EXACTA en los dos equipos.
+        2. `shot_type`: el codigo anterior guardaba `raw_shot.get("t")`
+           pensando que era el tipo de tiro (analogo al "type" de
+           NBA/Euroliga) -- en realidad "t" es el RELOJ del partido en
+           el momento del tiro ("05:26", minutos:segundos), confirmado
+           mirando la respuesta real (todas las 630k+ filas ya guardadas
+           de FEB tienen un string con pinta de reloj, nunca "2"/"3").
+           La API de FEB, a diferencia de NBA/Euroliga, NO expone un
+           campo por tiro que diga si fue de 2 o de 3 (el boxscore SI
+           trae p2m/p2a/p3m/p3a, pero agregados por jugador, no por tiro
+           suelto) -- en vez de inventar un tipo derivado de la
+           geometria (que duplicaria `zone` bajo otro nombre y lo
+           haria pasar por dato real, violando "no adivinar"), se
+           guarda el string "desconocido" explicitamente: honesto sobre
+           que esta fuente no lo reporta, y sigue siendo una categoria
+           valida para el modelo de tiro (train_shot.py) en vez de un
+           NaN que lo descartaria del dataset de entrenamiento.
+
+        Las filas YA guardadas en la tabla `shots` de estas 7
+        competiciones (ingeridas con el codigo viejo, con este bug) NO
+        se pueden arreglar con una migracion -- la cache de
+        data/raw/.../shots/*.json guarda el Shot ya parseado (con el bug
+        ya aplicado, ver docstring de raw_cache.py), no el JSON crudo
+        original, asi que hace falta re-ingerir (golpear la API de
+        verdad otra vez) para tener datos correctos. Ver
+        train_shot.py (FEB_SHOTS_PENDING_REINGEST) -- estas fuentes se
+        excluyen explicitamente del entrenamiento hasta que se
+        reingieran."""
         token = self._get_live_token(game_id)
         url = f"{_SHOTCHART_API}/{game_id}"
         try:
@@ -1290,8 +1331,8 @@ class FebSource:
                     team_id=team_id,
                     loc_x=float(raw_shot.get("x") or 0),
                     loc_y=float(raw_shot.get("y") or 0),
-                    made=bool(raw_shot.get("m")),
-                    shot_type=str(raw_shot.get("t")) if raw_shot.get("t") is not None else None,
+                    made=(str(raw_shot.get("m")) == "1"),
+                    shot_type="desconocido",
                 )
             )
         return shots

@@ -54,12 +54,22 @@ Un fallo real en UNA fuente (incluido un 429/RateLimitedError) NO para
 las demas -- se avisa y se sigue con la siguiente. Ver el resumen final
 para saber que fuentes terminaron bien y cuales no.
 
+AÑADIDO 2026-09-20(f): `--no-cache` fuerza rescrapear de verdad en vez
+de reutilizar lo que ya haya en data/raw/ -- necesario, por ejemplo,
+tras arreglar un bug de parseo real como el de FebSource.get_shots()
+("m"/"t" mal interpretados, ver docstring del modulo, "BUGS REALES
+corregidos 2026-09-20(e)"): la cache guarda el dato YA PARSEADO (con el
+bug ya aplicado si lo habia), asi que re-ejecutar sin --no-cache
+reutilizaria en silencio los mismos datos incorrectos en vez de volver
+a pedirlos.
+
 Uso:
     cd D:\Proyectos\Data_Basket
     python scripts\ingest_data.py
     python scripts\ingest_data.py --sources nba,wnba
     python scripts\ingest_data.py --sources cbb --limit 200   (CBB acotado)
     python scripts\ingest_data.py --no-players                (mas rapido)
+    python scripts\ingest_data.py --sources feb --no-cache    (forzar rescrapear)
 """
 from __future__ import annotations
 
@@ -139,7 +149,7 @@ def build_source(name: str):
 
 def parse_args() -> dict:
     argv = sys.argv[1:]
-    args = {"sources": DEFAULT_SOURCES, "fetch_players": True, "limit": None}
+    args = {"sources": DEFAULT_SOURCES, "fetch_players": True, "limit": None, "use_cache": True}
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -149,6 +159,8 @@ def parse_args() -> dict:
             args["fetch_players"] = False; i += 1
         elif arg == "--limit":
             args["limit"] = int(argv[i + 1]); i += 2
+        elif arg == "--no-cache":
+            args["use_cache"] = False; i += 1
         else:
             raise SystemExit(f"Argumento no reconocido: {arg!r}")
     return args
@@ -185,6 +197,7 @@ def main() -> None:
                 conn=conn,
                 fetch_players=args["fetch_players"],
                 limit=args["limit"],
+                use_cache=args["use_cache"],
             )
             results[name] = summary
             print(f"\n{summary}")

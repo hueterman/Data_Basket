@@ -62,6 +62,15 @@ _model_cache: dict[str, object] = {}
 # tener tiros reales guardados).
 SHOT_FEATURE_COLS: list[str] = ["dist_m", "angle_deg", "zone", "shot_type", "source"]
 
+# Competiciones FEB (FebSource): su API no reporta el tipo de tiro (2/3)
+# por tiro suelto, a diferencia de NBA/Euroliga/EuroCup/NextGen -- ver
+# docstring de FebSource.get_shots() y de shot_make_probability() mas
+# abajo. Se entrenan con shot_type="desconocido" fijo (train_shot.py),
+# nunca con "2"/"3" para estas fuentes.
+SOURCES_WITHOUT_REPORTED_SHOT_TYPE: frozenset[str] = frozenset({
+    "feb", "lfendesa", "lfchallenge", "lf2", "segundafeb", "tercerafeb", "copaespaa",
+})
+
 _SHOT_MODEL_FILES: dict[str, Path] = {
     "logreg": MODELS_DIR / "shot_make_logreg.joblib",
     "xgboost": MODELS_DIR / "shot_make_xgb.joblib",
@@ -260,7 +269,9 @@ def shot_make_probability(
     tabla de conversion por fuente, ver SHOT_COORD_CALIBRATION.
     shot_type: "2" o "3" -- tipo de intento REAL, no derivado de zone
     (ver docstring de train_shot.py sobre por que se entrena con las
-    dos columnas a la vez).
+    dos columnas a la vez). Excepcion: las competiciones FEB (ver
+    SOURCES_WITHOUT_REPORTED_SHOT_TYPE) exigen shot_type="desconocido"
+    en su lugar -- su fuente no reporta un tipo real por tiro.
 
     Reutiliza _classify_zone() y los umbrales three_pt_*_m de
     SHOT_COORD_CALIBRATION (src/features.py) -- misma formula de zona
@@ -279,8 +290,21 @@ def shot_make_probability(
             f"Sin coordenadas de tiro calibradas para source={source!r}. "
             f"Fuentes calibradas: {sorted(SHOT_COORD_CALIBRATION)}"
         )
-    if shot_type not in ("2", "3"):
-        raise PredictionError(f"shot_type debe ser '2' o '3' (recibido {shot_type!r}).")
+    if source in SOURCES_WITHOUT_REPORTED_SHOT_TYPE:
+        if shot_type != "desconocido":
+            raise PredictionError(
+                f"source={source!r} no reporta el tipo de tiro (2/3) por tiro "
+                f"suelto -- su API solo da coordenadas, no un campo equivalente "
+                f"(ver docstring de FebSource.get_shots() en src/scraper/feb.py, "
+                f"'BUGS REALES corregidos 2026-09-20(e)'). El modelo se entreno "
+                f"con shot_type='desconocido' para esta fuente, nunca con '2'/'3' "
+                f"-- pasa shot_type='desconocido' explicitamente en vez de "
+                f"inventar un tipo que el modelo nunca vio en este contexto."
+            )
+    elif shot_type not in ("2", "3"):
+        raise PredictionError(
+            f"shot_type debe ser '2' o '3' para source={source!r} (recibido {shot_type!r})."
+        )
 
     try:
         trained_sources = set(load_shot_metadata().get("sources", []))

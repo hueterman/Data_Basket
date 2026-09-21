@@ -77,22 +77,37 @@ api/app.py`), igual que `app/app.py`.
   `x_m`/`y_m` son coordenadas en **metros con origen en el aro** (misma
   convencion que `loc_x_m`/`loc_y_m` en `build_shot_features()`, NO las
   unidades nativas que guarda cada scraper en la tabla `shots` --
-  decimas de pie en NBA, centimetros en Euroliga/EuroCup). `shot_type`
-  es `"2"` o `"3"` (tipo de intento real). Devuelve `make_probability`
-  mas `zone`/`dist_m`/`angle_deg` ya calculados con las mismas formulas
-  que `src/features.py`.
+  decimas de pie en NBA, centimetros en Euroliga/EuroCup, porcentaje de
+  cancha completa en FEB). `shot_type` es `"2"` o `"3"` para NBA/
+  Euroliga/EuroCup/NextGen -- para las 7 competiciones FEB (ver mas
+  abajo) tiene que ser `"desconocido"` en su lugar. Devuelve
+  `make_probability` mas `zone`/`dist_m`/`angle_deg` ya calculados con
+  las mismas formulas que `src/features.py`.
 
   **Solo fuentes con coordenadas de tiro CALIBRADAS y con las que el
-  modelo se entreno de verdad**: a fecha de esta version, `nba`,
-  `euroleague`, `eurocup` y `nextgen`. Al ampliar FEB a 8 competiciones
-  (fase anterior) resulto que `feb`/`lfendesa`/`lfchallenge`/`lf2`/
-  `segundafeb`/`tercerafeb`/`copaespaa` YA TIENEN tiros reales guardados
-  (100k-190k por competicion) -- pero nadie ha calibrado sus coordenadas
-  a metros ni sus distancias reales de triple con la verificacion en
-  vivo que llevan el resto de fuentes (ver `SHOT_COORD_CALIBRATION` en
-  `src/features.py`), asi que `/predict_shot` las rechaza explicitamente
-  con un 400 en vez de adivinar una calibracion sin confirmar. Es
-  trabajo pendiente, no un descuido de esta fase.
+  modelo se entreno de verdad** (`GET /model/info/shot` -> `sources`
+  dice cuales exactamente): a fecha de esta version, 11 -- `nba`,
+  `euroleague`, `eurocup`, `nextgen` y las 7 competiciones FEB (`feb`,
+  `lfendesa`, `lfchallenge`, `lf2`, `segundafeb`, `tercerafeb`,
+  `copaespaa`), calibradas y reentrenadas en una fase posterior a la
+  primera version de este endpoint.
+
+  Las 7 FEB tuvieron su propio capitulo: al calibrarlas se descubrieron
+  dos bugs reales en `FebSource.get_shots()` (`src/scraper/feb.py`) --
+  `made` salia SIEMPRE `True` (`bool("0")` es `True` en Python, "m" es
+  un string) y `shot_type` guardaba el reloj del partido, no el tipo de
+  tiro (la API de FEB no reporta eso por tiro suelto, a diferencia de
+  NBA/Euroliga). Corregido, verificado en vivo contra un boxscore real
+  (FGM/FGA exactos), y reingerido de verdad por el usuario
+  (`ingest_historical.py --no-cache`, necesario porque la cache de
+  `data/raw/` guardaba el dato ya mal parseado) antes de reentrenar --
+  ver el aviso "REINGESTA CONFIRMADA 2026-09-21" en `train_shot.py`.
+  Como su API no reporta un tipo de tiro real por tiro suelto, se
+  entrenaron con `shot_type="desconocido"` fijo, y `/predict_shot`
+  rechaza con un 400 cualquier `"2"`/`"3"` para estas 7 fuentes en vez
+  de dejar que el modelo generalice sobre una categoria que nunca vio
+  en ese contexto (ver `SOURCES_WITHOUT_REPORTED_SHOT_TYPE` en
+  `src/predict.py`).
 
 Ejemplo de error (equipo sin partidos jugados, fuente desconocida,
 `home_team_id == away_team_id`, modelo inexistente, o modelos sin
@@ -134,17 +149,26 @@ ambos equipos por defecto (`diff_rest_days = 0`) -- se puede afinar con
   Flask (sin levantar el servidor) contra la base de datos real
   (`data/processed/basketball.db`) -- `GET /health`, `/model/info`,
   `/teams?source=nba`, un `POST /predict` real entre dos equipos NBA
-  reales, `GET /model/info/shot`, dos `POST /predict_shot` reales (uno
-  junto al aro, otro un triple de arco) mas peticiones mal formadas
-  para comprobar los 400. Ejecutado de verdad en esta sesion:
-  `home_win_probability=0.4654` para Atlanta Hawks (local) - Boston
-  Celtics (visitante); para tiro, `make_probability=0.9457` junto al
-  aro vs `0.0018` en un triple muy de frente y justo pasada la linea --
-  el primero es razonable, el segundo probablemente refleja mas el
-  AUC modesto del modelo (0.653, ver `/model/info/shot`) que la
-  realidad del baloncesto (un triple asi deberia rondar el 30-35%, no
-  el 0.2%) -- limitacion real del modelo de `train_shot.py` (features
-  limitadas a distancia/angulo/zona/tipo/fuente, sin nada de contexto
+  reales, `GET /model/info/shot`, `POST /predict_shot` real (aro y
+  triple de NBA, mas uno con `shot_type="desconocido"` de FEB) mas
+  peticiones mal formadas para comprobar los 400. Ejecutado de verdad
+  en esta sesion: `home_win_probability=0.4654` para Atlanta Hawks
+  (local) - Boston Celtics (visitante); para tiro (modelo con 11
+  fuentes, accuracy=0.632/AUC=0.654), `make_probability=0.9457` junto
+  al aro de NBA vs `0.0018` en un triple muy de frente y justo pasada
+  la linea -- el primero es razonable, el segundo probablemente
+  refleja mas el AUC modesto del modelo que la realidad del baloncesto
+  (deberia rondar 30-35%, no 0.2%) -- limitacion real del modelo
+  (features limitadas a distancia/angulo/zona/tipo/fuente, sin contexto
   del defensor ni del tirador), no un bug de como el API lo sirve. No
   se ha comprobado ningun numero contra una casa de apuestas ni fuente
   externa (no es esa la funcion de esta prueba).
+- **Calibracion y limpieza de las 7 competiciones FEB** (sesion
+  2026-09-20/21): la calibracion de coordenadas se valido con la
+  distribucion real de distancias al aro (pico junto al aro, valle
+  justo antes de la linea de 3, repunte despues -- patron real de
+  cualquier grafico de tiro, ver comentario en `SHOT_COORD_CALIBRATION`
+  de `src/features.py`). Tras la reingesta real del usuario, se
+  verifico con `zone_fg_pct()` que el FG% por zona cae en rango
+  conocido (aro 59-68%, triple_arco 27-35% en las 7 competiciones) antes
+  de reentrenar `train_shot.py` con ellas.

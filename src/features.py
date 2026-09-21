@@ -89,17 +89,93 @@ SHOT_COORD_CALIBRATION: dict[str, dict] = {
     # acb: sin datos de tiro todavia -- acb.py no implementa get_shots().
     #
     # feb / lfendesa / lfchallenge / lf2 / segundafeb / tercerafeb /
-    # copaespaa (FebSource, ver feb.py): CORRECCION 2026-09-20 -- al
-    # contrario de lo que decia esta nota antes, get_shots() SI esta
-    # implementado y SI hay tiros reales guardados (confirmado corriendo
-    # train_shot.py: 100k-190k filas en `shots` por competicion, ver su
-    # docstring). Lo que falta es calibrar loc_x/loc_y a metros y las
-    # distancias reales de la linea de 3 de baloncestoenvivo.feb.es con
-    # el mismo rigor que el resto de esta tabla (confirmacion en vivo +
-    # densidad de tiros, ver notebook secciones 3/5/6) -- no se inventa
-    # aqui sin esa verificacion. Hasta entonces, train_shot.py excluye
-    # estas fuentes explicitamente (SHOT_TRAINABLE_SOURCES en su
-    # cabecera) en vez de fallar en bloque por _require_known_sources().
+    # copaespaa (FebSource, ver feb.py) -- CALIBRADO 2026-09-20, misma
+    # sesion en la que se corrigieron dos bugs reales de get_shots()
+    # (ver su docstring): loc_x/loc_y NO son pixeles ni cm como el resto
+    # de fuentes, son PORCENTAJE (0-100) de la CANCHA COMPLETA -- x a lo
+    # largo del eje longitudinal (confirmado por su histograma bimodal:
+    # dos nubes densas, una hacia x~5-10 y otra hacia x~85-95, con un
+    # valle en el centro x~35-60 donde casi nadie tira -- exactamente lo
+    # esperable con dos aros en los dos extremos de una cancha completa),
+    # y a lo largo del eje de anchura (histograma unimodal centrado en
+    # y~50, ambos aros centrados en el ancho de la cancha).
+    #
+    # Conversion: se pliega x al aro mas cercano (min(x, 100-x)) y se usa
+    # la cancha reglamentaria FIBA (28m x 15m, aro a 1.575m de la linea
+    # de fondo -- normativa oficial, no una fuente que haga falta
+    # verificar en vivo, igual que 6.75m/6.60m de linea de 3 ya se usa
+    # sin verificacion adicional para euroleague/eurocup/nextgen).
+    # CONFIRMADO empiricamente con densidad de tiros reales de 'feb'
+    # (186986 tiros): convertida asi, la distancia al aro tiene el
+    # patron esperado de cualquier grafico de tiro real -- pico enorme
+    # cerca del aro (0-2m), valle claro justo antes de la linea de 3
+    # (minimo en el bin de 6.00-6.25m), y la cuenta vuelve a subir con
+    # fuerza a partir de 6.5-6.75m hasta un segundo pico en 7.5-8.5m
+    # (encaja con 6.75m de linea de 3 FIBA + el patron habitual de tirar
+    # algo mas atras del minimo de la linea).
+    "feb": {
+        "to_meters": lambda x, y: (
+            (y / 100.0) * 15.0 - 7.5,
+            28.0 * np.minimum(x, 100 - x) / 100.0 - 1.575,
+        ),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
+    "lfendesa": {
+        "to_meters": lambda x, y: (
+            (y / 100.0) * 15.0 - 7.5,
+            28.0 * np.minimum(x, 100 - x) / 100.0 - 1.575,
+        ),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
+    "lfchallenge": {
+        "to_meters": lambda x, y: (
+            (y / 100.0) * 15.0 - 7.5,
+            28.0 * np.minimum(x, 100 - x) / 100.0 - 1.575,
+        ),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
+    "lf2": {
+        "to_meters": lambda x, y: (
+            (y / 100.0) * 15.0 - 7.5,
+            28.0 * np.minimum(x, 100 - x) / 100.0 - 1.575,
+        ),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
+    "segundafeb": {
+        "to_meters": lambda x, y: (
+            (y / 100.0) * 15.0 - 7.5,
+            28.0 * np.minimum(x, 100 - x) / 100.0 - 1.575,
+        ),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
+    "tercerafeb": {
+        "to_meters": lambda x, y: (
+            (y / 100.0) * 15.0 - 7.5,
+            28.0 * np.minimum(x, 100 - x) / 100.0 - 1.575,
+        ),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
+    "copaespaa": {
+        "to_meters": lambda x, y: (
+            (y / 100.0) * 15.0 - 7.5,
+            28.0 * np.minimum(x, 100 - x) / 100.0 - 1.575,
+        ),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
+    # IMPORTANTE -- calibrar coordenadas NO es lo mismo que tener datos
+    # limpios: las filas de `shots` YA guardadas para estas 7
+    # competiciones vienen del codigo con el bug de made/shot_type
+    # (ver "BUGS REALES corregidos 2026-09-20(e)" en feb.py) y no se
+    # pueden arreglar sin reingerir. Por eso train_shot.py NO las
+    # incluye todavia pese a estar aqui ya calibradas -- ver
+    # FEB_SHOTS_PENDING_REINGEST en su cabecera.
 }
 
 

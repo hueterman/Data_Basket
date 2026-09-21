@@ -145,12 +145,23 @@ data/raw/ -- si se corta a mitad, volver a ejecutar retoma sin repetir
 peticiones ya hechas. Un fallo real en una (fuente, temporada) --
 incluido un RateLimitedError -- NO para las demas combinaciones.
 
+AÑADIDO 2026-09-20(f): `--no-cache` fuerza rescrapear de verdad en vez
+de reutilizar lo que ya haya en data/raw/. IMPRESCINDIBLE para
+reingerir de verdad las 7 competiciones FEB con el fix de
+FebSource.get_shots() (ver "BUGS REALES corregidos 2026-09-20(e)" en
+src/scraper/feb.py, y "AMPLIACION 2026-09-20(c)" en train_shot.py) --
+sin --no-cache, este script reutilizaria en silencio los ficheros ya
+guardados en data/raw/.../shots/*.json, que tienen el bug YA APLICADO
+(made siempre True, shot_type con el reloj del partido) porque la cache
+guarda el Shot ya parseado, no el JSON crudo de la API.
+
 Uso:
     cd D:\Proyectos\Data_Basket
     python scripts\ingest_historical.py
     python scripts\ingest_historical.py --sources nba
     python scripts\ingest_historical.py --sources nba --seasons 2020-21,2019-20
     python scripts\ingest_historical.py --no-players
+    python scripts\ingest_historical.py --sources feb,lfendesa,lfchallenge,lf2,segundafeb,tercerafeb,copaespaa --no-cache
 """
 from __future__ import annotations
 
@@ -244,7 +255,7 @@ def build_source(name: str, season: str):
 
 def parse_args() -> dict:
     argv = sys.argv[1:]
-    args = {"sources": DEFAULT_SOURCES, "seasons": None, "fetch_players": True, "limit": None}
+    args = {"sources": DEFAULT_SOURCES, "seasons": None, "fetch_players": True, "limit": None, "use_cache": True}
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -256,6 +267,8 @@ def parse_args() -> dict:
             args["fetch_players"] = False; i += 1
         elif arg == "--limit":
             args["limit"] = int(argv[i + 1]); i += 2
+        elif arg == "--no-cache":
+            args["use_cache"] = False; i += 1
         else:
             raise SystemExit(f"Argumento no reconocido: {arg!r}")
     if args["seasons"] is not None and len(args["sources"]) != 1:
@@ -305,6 +318,7 @@ def main() -> None:
             summary = ingest_source(
                 source_obj, season=season, conn=conn,
                 fetch_players=args["fetch_players"], limit=args["limit"],
+                use_cache=args["use_cache"],
             )
             results[(name, season)] = summary
             print(f"\n{summary}")

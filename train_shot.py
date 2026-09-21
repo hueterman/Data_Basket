@@ -77,25 +77,39 @@ from src.features import SHOT_COORD_CALIBRATION, build_shot_features, zone_fg_pc
 from src.pipeline import get_connection
 from src.scraper.base import TRAINABLE_SOURCES
 
-# AMPLIACION 2026-09-20: al ampliar FebSource a 8 competiciones (ver
+# AMPLIACION 2026-09-20(b): al ampliar FebSource a 8 competiciones (ver
 # feb.py/base.py) resulto que get_shots() SI esta implementado alli --
 # feb/lfendesa/lfchallenge/lf2/segundafeb/tercerafeb/copaespaa ya tienen
-# tiros reales en la tabla `shots` (confirmado corriendo este mismo
-# script: 100k-190k tiros cada una segun la competicion), algo que el
-# comentario de SHOT_COORD_CALIBRATION en features.py daba por no
-# existente todavia -- ya corregido alli. Pero NADIE ha calibrado sus
-# coordenadas (three_pt_arc_m/three_pt_corner_m, conversion a metros)
-# con el mismo rigor que NBA/Euroliga/EuroCup/WNBA (confirmacion en vivo
-# + densidad de tiros, ver notebook secciones 3/5/6) -- eso es un
-# trabajo de verificacion aparte, no algo que se pueda inventar aqui sin
-# violar "no adivinar". Por eso este script fija `sources` explicitamente
-# a solo las fuentes YA calibradas (interseccion de SHOT_COORD_CALIBRATION
-# y TRAINABLE_SOURCES) en vez de dejar que build_shot_features(conn) sin
+# tiros reales en la tabla `shots` (100k-190k cada una). Este script fija
+# `sources` explicitamente a la interseccion de SHOT_COORD_CALIBRATION y
+# TRAINABLE_SOURCES en vez de dejar que build_shot_features(conn) sin
 # argumentos intente coger TODAS las entrenables con tiros -- así, el
-# dia que se calibre una fuente nueva, este script la coge sola sin
-# tocar codigo, y mientras tanto no revienta en bloque por culpa de
-# fuentes con tiros reales pero sin calibrar todavia.
-SHOT_TRAINABLE_SOURCES = sorted(set(SHOT_COORD_CALIBRATION) & TRAINABLE_SOURCES)
+# dia que se calibre/reingiera una fuente nueva, este script la coge
+# sola sin tocar codigo.
+#
+# AMPLIACION 2026-09-20(c): las 7 competiciones FEB estan calibradas en
+# SHOT_COORD_CALIBRATION (features.py). Sus filas de `shots` originales
+# tenian dos bugs reales de FebSource.get_shots() ("made" siempre True,
+# "shot_type" con el reloj del partido en vez del tipo -- ver su
+# docstring, "BUGS REALES corregidos 2026-09-20(e)") que obligaron a
+# reingerir de verdad (no bastaba corregir el codigo, la cache de
+# data/raw/ guardaba el dato ya mal parseado).
+#
+# REINGESTA CONFIRMADA 2026-09-21: usuario ejecuto
+# `ingest_historical.py --no-cache` sobre las 7 -- verificado que
+# `made` ya no es 100% True (distribucion real: 36-45% de acierto
+# global por competicion, dentro de lo esperable) y que el FG% por
+# zona con datos reales (zone_fg_pct()) cae en el rango real conocido
+# (aro 59-68%, triple_arco 27-35%, ver docstring de zone_fg_pct() en
+# features.py) -- ya no hay razon para seguir excluyendolas.
+# FEB_SHOTS_PENDING_REINGEST se deja vacio (no se borra la constante,
+# por si aparece otra fuente en la misma situacion mas adelante) en vez
+# de borrar toda esta logica -- mismo patron defensivo, minimiza el
+# diff si hay que volver a excluir algo.
+FEB_SHOTS_PENDING_REINGEST: set[str] = set()
+SHOT_TRAINABLE_SOURCES = sorted(
+    (set(SHOT_COORD_CALIBRATION) & TRAINABLE_SOURCES) - FEB_SHOTS_PENDING_REINGEST
+)
 
 NUMERIC_COLS = ["dist_m", "angle_deg"]
 CATEGORICAL_COLS = ["zone", "shot_type", "source"]

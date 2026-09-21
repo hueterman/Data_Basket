@@ -232,7 +232,7 @@ def test_shot_mechanics() -> None:
     # aparece aqui a proposito).
     import json
     with open(tmp_dir / "shot_make_metadata.json", "w", encoding="utf-8") as f:
-        json.dump({"sources": ["nba", "euroleague"]}, f)
+        json.dump({"sources": ["nba", "euroleague", "feb"]}, f)
 
     result = predict_mod.shot_make_probability(
         source="nba", x_m=0.5, y_m=1.0, shot_type="2", model_name="logreg",
@@ -241,6 +241,12 @@ def test_shot_mechanics() -> None:
     assert result["zone"] == "aro", f"(0.5, 1.0) deberia clasificar como 'aro', salio {result['zone']!r}"
     assert 0.0 <= result["make_probability"] <= 1.0
 
+    result_feb = predict_mod.shot_make_probability(
+        source="feb", x_m=0.5, y_m=1.0, shot_type="desconocido", model_name="logreg",
+    )
+    print(f"  shot_make_probability(feb, shot_type='desconocido'): {result_feb}")
+    assert 0.0 <= result_feb["make_probability"] <= 1.0
+
     for label, fn in [
         ("fuente sin calibrar (acb)",
          lambda: predict_mod.shot_make_probability("acb", 1.0, 1.0, "2")),
@@ -248,6 +254,8 @@ def test_shot_mechanics() -> None:
          lambda: predict_mod.shot_make_probability("nba", 1.0, 1.0, "libre")),
         ("fuente calibrada pero no entrenada (eurocup)",
          lambda: predict_mod.shot_make_probability("eurocup", 1.0, 1.0, "2", model_name="logreg")),
+        ("feb con shot_type real en vez de 'desconocido'",
+         lambda: predict_mod.shot_make_probability("feb", 1.0, 1.0, "2", model_name="logreg")),
     ]:
         try:
             fn()
@@ -345,11 +353,26 @@ def test_real_api_if_available() -> None:
             f"(salio {p_rim} vs {p_three}) -- comprobacion de cordura basica"
         )
 
-        r = client.post("/predict_shot", json={
+        r_feb_ok = client.post("/predict_shot", json={
+            "source": "feb", "x_m": 0.5, "y_m": 1.0, "shot_type": "desconocido",
+        })
+        print(f"  POST /predict_shot (feb, junto al aro, shot_type='desconocido') -> "
+              f"{r_feb_ok.status_code} {r_feb_ok.get_json()}")
+        assert r_feb_ok.status_code == 200
+
+        r_feb_bad_type = client.post("/predict_shot", json={
             "source": "feb", "x_m": 1.0, "y_m": 1.0, "shot_type": "2",
         })
-        print(f"  POST /predict_shot (feb, sin calibrar) -> {r.status_code} {r.get_json()}")
-        assert r.status_code == 400
+        print(f"  POST /predict_shot (feb, shot_type='2' -- deberia rechazarse) -> "
+              f"{r_feb_bad_type.status_code} {r_feb_bad_type.get_json()}")
+        assert r_feb_bad_type.status_code == 400
+
+        r_uncalibrated = client.post("/predict_shot", json={
+            "source": "acb", "x_m": 1.0, "y_m": 1.0, "shot_type": "2",
+        })
+        print(f"  POST /predict_shot (acb, sin calibrar) -> "
+              f"{r_uncalibrated.status_code} {r_uncalibrated.get_json()}")
+        assert r_uncalibrated.status_code == 400
     else:
         print("  (sin modelo de tiro real en models/ todavia -- ejecuta 'python train_shot.py' "
               "para probar /predict_shot. No es un fallo.)")

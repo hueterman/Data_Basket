@@ -66,9 +66,13 @@ Endpoints:
         METROS con origen en el aro (no las unidades nativas de cada
         scraper -- ver docstring de src/predict.py:shot_make_probability()).
         SOLO fuentes con coordenadas de tiro calibradas Y con las que
-        se entreno de verdad el modelo (nunca FEB/lfendesa/etc todavia,
-        pese a que ya tienen tiros reales guardados -- ver la nota
-        "AMPLIACION 2026-09-20" en train_shot.py sobre por que). Devuelve
+        se entreno de verdad el modelo -- GET /model/info/shot dice
+        cuales son ahora mismo (11 a fecha de esta version: nba,
+        euroleague, eurocup, nextgen, feb, lfendesa, lfchallenge, lf2,
+        segundafeb, tercerafeb, copaespaa). Para las 7 competiciones FEB,
+        `shot_type` debe ser "desconocido" en vez de "2"/"3" -- su fuente
+        no reporta el tipo real por tiro suelto (ver
+        SOURCES_WITHOUT_REPORTED_SHOT_TYPE en src/predict.py). Devuelve
         make_probability mas la zona/distancia/angulo ya calculados.
 """
 from __future__ import annotations
