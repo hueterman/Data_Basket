@@ -103,7 +103,11 @@ responde, o `https://algo.trycloudflare.com/predict_shot` con un
 cliente HTTP) mientras dure la demo, y **cierra el tunel al terminar**
 (Ctrl+C) -- mientras este abierto, tu API (de solo lectura, pero con
 toda la base de datos detras) es alcanzable por cualquiera que tenga
-la URL.
+la URL. `/predict` y `/predict_shot` (AÑADIDO 2026-09-21) tienen un
+rate limit basico de 30 peticiones/minuto por IP (Flask-Limiter, ver
+`api/app.py`) para que nadie las sature sin querer mientras el tunel
+esta abierto -- sigue sin haber autenticacion, asi que esto no
+sustituye a cerrar el tunel al terminar.
 
 **Para cuando llegue el despliegue real (mas adelante, fuera de
 alcance de esta fase):** el bloqueo principal sera el tamaño de

@@ -29,6 +29,7 @@ joblib
 # --- Servicio ---
 flask
 flask-swagger-ui  # interfaz interactiva de /docs (api/openapi.json), punto 6 del roadmap
+flask-limiter  # rate limiting basico en /predict y /predict_shot (api/app.py)
 waitress  # servidor WSGI real para PRODUCTION=1 en api/app.py -- puro Python,
           # funciona en Windows sin compilador (a diferencia de gunicorn), sin
           # el depurador interactivo de Werkzeug que trae el server de Flask

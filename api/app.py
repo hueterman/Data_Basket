@@ -116,6 +116,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from flask import Flask, jsonify, request, send_from_directory
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_swagger_ui import get_swaggerui_blueprint
 
 from src.pipeline.db import get_connection
@@ -130,6 +132,28 @@ from src.predict import (
 )
 
 app = Flask(__name__)
+
+# Rate limiting basico (AÑADIDO 2026-09-21) -- /predict y /predict_shot
+# no tenian limite de peticiones ni autenticacion: aceptable mientras
+# el API solo se enseña puntualmente detras de un tunel, pero si se
+# deja accesible mas tiempo cualquiera podria saturarlo (a proposito o
+# sin querer, p. ej. un script que reintenta en bucle). limiter.limit()
+# se aplica solo a esas dos rutas (ver mas abajo) -- /health, /teams,
+# /model/info* y la documentacion se quedan sin limite, son de lectura
+# y mucho mas baratas de servir.
+#
+# Almacenamiento en memoria (por defecto de Flask-Limiter, sin
+# storage_uri): correcto para un proceso Flask/waitress unico como
+# este -- con varios procesos/workers cada uno llevaria su propia
+# cuenta y el limite real seria mas alto que el nominal, pero este
+# servicio no se despliega asi (ver "Despliegue para demos" en
+# api/README.md).
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[],
+    headers_enabled=True,
+)
 
 # Documentacion OpenAPI/Swagger (AÑADIDO 2026-09-21, punto 6 del roadmap):
 # api/openapi.json describe a mano los 6 endpoints reales (request/response
@@ -160,6 +184,11 @@ def db():
     para esto), y se beneficia del mismo modo WAL de get_connection()
     para no chocar con una ingesta escribiendo a la vez."""
     return get_connection()
+
+
+@app.errorhandler(429)
+def rate_limit_exceeded(exc):
+    return jsonify({"error": f"Demasiadas peticiones -- limite: {exc.description}"}), 429
 
 
 @app.route("/health")
@@ -209,6 +238,7 @@ def teams():
 
 
 @app.route("/predict", methods=["POST"])
+@limiter.limit("30 per minute")
 def predict():
     data = request.get_json(silent=True) or {}
 
@@ -243,6 +273,7 @@ def predict():
 
 
 @app.route("/predict_shot", methods=["POST"])
+@limiter.limit("30 per minute")
 def predict_shot():
     data = request.get_json(silent=True) or {}
 
