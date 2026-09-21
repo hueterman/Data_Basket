@@ -266,16 +266,25 @@ consecutivas) -- no es una suposicion.
 
 ## Validado
 
-- **Mecanica** (`scripts/test_api.py`, parte 1): base de datos SQLite
-  de prueba fabricada a mano (3 equipos, 8 partidos sinteticos, NO datos
-  reales de ninguna fuente) + un modelo de mentira solo para probar la
-  forma de entrada/salida de `predict_proba` -- comprueba que las medias
+- **Mecanica** (`tests/test_predict_game_outcome.py`, `tests/test_predict_shot.py`
+  y `tests/test_feb_shots_parsing.py`, migrados desde el antiguo
+  `scripts/test_api.py`/`scripts/test_feb_shots_fix.py` a una suite
+  pytest real -- `pytest tests/` desde la raiz del proyecto, tambien se
+  ejecuta sola en GitHub Actions en cada push, ver
+  `.github/workflows/tests.yml`): base de datos SQLite de prueba
+  fabricada a mano (4 equipos, 22 partidos sinteticos, NO datos reales
+  de ninguna fuente) + un modelo de mentira solo para probar la forma de
+  entrada/salida de `predict_proba` -- comprueba que las medias
   pre-partido salen correctas, que el aviso de "poco historial" aparece
-  cuando corresponde, y que los 4 casos de error esperados
-  (mismo equipo local/visitante, equipo inexistente, fuente sin datos,
-  modelo desconocido) lanzan `PredictionError` en vez de reventar.
-- **Integracion real** (`scripts/test_api.py`, parte 2, SOLO si ya
-  existen los `.joblib` reales correspondientes): cliente de pruebas de
+  cuando corresponde (y se suprime con arrastre entre temporadas), y que
+  los casos de error esperados (mismo equipo local/visitante, equipo
+  inexistente, fuente sin datos, modelo desconocido, y sus equivalentes
+  para el modelo de tiro) lanzan `PredictionError` en vez de reventar.
+- **Integracion real** (`tests/test_api_integration.py`, SOLO si ya
+  existen los `.joblib`/`basketball.db` reales -- si no existen, cada
+  test se salta con `pytest.skip` en vez de fallar, para que la misma
+  suite funcione en un checkout limpio de CI sin esos ficheros
+  gitignored): cliente de pruebas de
   Flask (sin levantar el servidor) contra la base de datos real
   (`data/processed/basketball.db`) -- `GET /health`, `/model/info`,
   `/teams?source=nba`, un `POST /predict` real entre dos equipos NBA

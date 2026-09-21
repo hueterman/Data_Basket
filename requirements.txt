@@ -34,6 +34,9 @@ waitress  # servidor WSGI real para PRODUCTION=1 en api/app.py -- puro Python,
           # el depurador interactivo de Werkzeug que trae el server de Flask
 streamlit
 
+# --- Testing / CI ---
+pytest  # tests/ (pytest + GitHub Actions, ver .github/workflows/tests.yml)
+
 # --- Orquestacion (opcional, fase 7 -- descomentar si hace falta) ---
 # prefect
 # apache-airflow
