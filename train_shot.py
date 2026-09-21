@@ -30,6 +30,17 @@ propiedades del LANZAMIENTO, no de su resultado):
 - source: el % de acierto base difiere por liga/temporada (estilo de
   juego, nivel) -- se dejan que el modelo lo aprenda en vez de asumir
   que NBA/Euroliga/EuroCup tiran igual.
+- player_prior_fg, player_prior_n_log (AÑADIDAS 2026-09-21, ver
+  add_shot_priors() en src/features.py para el detalle completo y la
+  verificacion empirica que las motivo): acierto/volumen PREVIO del
+  jugador en su zona, calculados solo con partidos anteriores al del
+  tiro (shift(1) a nivel de partido, mismo criterio "sin fuga de datos"
+  que features_pregame.py) y encogidos hacia el acierto de liga de esa
+  (source, zone) con SHOT_PRIOR_K_SHRINK intentos virtuales -- no son
+  propiedades de la GEOMETRIA del tiro como dist_m/angle_deg/zone, pero
+  SI son conocidas antes de que el tiro se resuelva (todo el historico
+  del jugador hasta el partido anterior), asi que no hay fuga de datos
+  nueva aqui.
 
 FUENTES: solo las que ya tienen coordenadas de tiro calibradas Y son
 TRAINABLE (ver SHOT_COORD_CALIBRATION en src/features.py) -- a fecha
@@ -73,7 +84,10 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from xgboost import XGBClassifier
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from src.features import SHOT_COORD_CALIBRATION, build_shot_features, zone_fg_pct
+from src.features import (
+    SHOT_COORD_CALIBRATION, SHOT_PRIOR_K_SHRINK, add_shot_priors,
+    build_shot_features, zone_fg_pct,
+)
 from src.pipeline import get_connection
 from src.scraper.base import TRAINABLE_SOURCES
 
@@ -111,7 +125,7 @@ SHOT_TRAINABLE_SOURCES = sorted(
     (set(SHOT_COORD_CALIBRATION) & TRAINABLE_SOURCES) - FEB_SHOTS_PENDING_REINGEST
 )
 
-NUMERIC_COLS = ["dist_m", "angle_deg"]
+NUMERIC_COLS = ["dist_m", "angle_deg", "player_prior_fg", "player_prior_n_log"]
 CATEGORICAL_COLS = ["zone", "shot_type", "source"]
 FEATURE_COLS = NUMERIC_COLS + CATEGORICAL_COLS
 MODELS_DIR = Path(__file__).resolve().parent / "models"
@@ -220,6 +234,10 @@ def main() -> None:
             f"formato inesperado, revisar antes de continuar (ejemplos: {examples})"
         )
 
+    print(f"Añadiendo prior de jugador por zona (add_shot_priors(), k_shrink={SHOT_PRIOR_K_SHRINK}, "
+          f"ver docstring de src/features.py)...")
+    shots = add_shot_priors(shots, games_dates, k_shrink=SHOT_PRIOR_K_SHRINK)
+
     n_before = len(shots)
     shots = shots.dropna(subset=FEATURE_COLS + ["made"]).reset_index(drop=True)
     if len(shots) < n_before:
@@ -281,6 +299,7 @@ def main() -> None:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     joblib.dump(logreg, MODELS_DIR / "shot_make_logreg.joblib")
     joblib.dump(xgb, MODELS_DIR / "shot_make_xgb.joblib")
+    league_zone_fg = zone_fg_pct(shots, by=["source"])[["source", "zone", "fg_pct"]]
     metadata = {
         "target": "made",
         "feature_cols": FEATURE_COLS,
@@ -294,6 +313,15 @@ def main() -> None:
             "xgboost": metrics_xgb,
         },
         "sanity_check_by_zone": sanity,
+        # Usado por src/predict.py:shot_make_probability() para calcular
+        # el prior de un jugador EN VIVO sin reconstruir el dataset
+        # completo de tiros en cada peticion (ver add_shot_priors() en
+        # src/features.py) -- FG% de (source, zone) sobre TODOS los
+        # tiros utilizables de este entrenamiento, mismo valor que se
+        # uso como "fallback_fg"/ancla de encogido dentro del propio
+        # add_shot_priors() al construir este dataset.
+        "league_zone_fg": league_zone_fg.to_dict(orient="records"),
+        "shot_prior_k_shrink": SHOT_PRIOR_K_SHRINK,
     }
     with open(MODELS_DIR / "shot_make_metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)

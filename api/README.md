@@ -71,7 +71,8 @@ api/app.py`), igual que `app/app.py`.
     "x_m": 2.5,
     "y_m": 5.0,
     "shot_type": "2",
-    "model": "xgboost"
+    "model": "xgboost",
+    "player_id": "203999"
   }
   ```
   `x_m`/`y_m` son coordenadas en **metros con origen en el aro** (misma
@@ -80,9 +81,15 @@ api/app.py`), igual que `app/app.py`.
   decimas de pie en NBA, centimetros en Euroliga/EuroCup, porcentaje de
   cancha completa en FEB). `shot_type` es `"2"` o `"3"` para NBA/
   Euroliga/EuroCup/NextGen -- para las 7 competiciones FEB (ver mas
-  abajo) tiene que ser `"desconocido"` en su lugar. Devuelve
-  `make_probability` mas `zone`/`dist_m`/`angle_deg` ya calculados con
-  las mismas formulas que `src/features.py`.
+  abajo) tiene que ser `"desconocido"` en su lugar. `player_id`
+  (**opcional**, añadido 2026-09-21, ver "Prior de jugador" mas abajo)
+  es el id real de jugador de esa `source` (el mismo que devuelve
+  `shots`/`players`) -- si se pasa, la prediccion usa el acierto
+  historico REAL de ese jugador en la zona del tiro; si no se pasa, usa
+  el acierto medio de liga de esa zona ("jugador medio"). Devuelve
+  `make_probability`, `player_prior_fg` (el prior usado, de jugador o de
+  liga) y `zone`/`dist_m`/`angle_deg` ya calculados con las mismas
+  formulas que `src/features.py`.
 
   **Solo fuentes con coordenadas de tiro CALIBRADAS y con las que el
   modelo se entreno de verdad** (`GET /model/info/shot` -> `sources`
@@ -108,6 +115,27 @@ api/app.py`), igual que `app/app.py`.
   de dejar que el modelo generalice sobre una categoria que nunca vio
   en ese contexto (ver `SOURCES_WITHOUT_REPORTED_SHOT_TYPE` en
   `src/predict.py`).
+
+  **Prior de jugador (añadido 2026-09-21):** antes de esto el modelo
+  solo miraba la GEOMETRIA del tiro (distancia/angulo/zona/tipo/fuente)
+  -- dos jugadores tirando desde el mismo sitio siempre daban la misma
+  probabilidad, aunque uno fuera un especialista y el otro casi nunca
+  tirara desde ahi. Se comprobo en datos reales (no se adivino) que hay
+  señal real de jugador mas alla de la geometria: agrupando los 2.45M
+  tiros por (source, player_id) con >=50 intentos, la desviacion real de
+  FG% entre jugadores es ~4x la esperable solo por azar en la zona
+  "aro" y ~2.3x en "triple_arco". Se añadieron `player_prior_fg`/
+  `player_prior_n_log` -- el acierto/volumen PREVIO del jugador en esa
+  zona, calculado solo con partidos anteriores (nunca fuga de datos,
+  mismo criterio que el resto del proyecto) y encogido hacia el acierto
+  de liga con 20 intentos virtuales (formula beta-binomial estandar,
+  ver `add_shot_priors()` en `src/features.py`) -- con pocos tiros
+  previos el prior queda cerca de la media de liga, con muchos se acerca
+  al acierto real del jugador. En el API esto se calcula EN VIVO
+  (`_player_zone_prior()` en `src/predict.py`) sobre el historico real
+  de `shots` cuando se pasa `player_id`; sin `player_id` se usa
+  directamente el acierto de liga guardado en la metadata del modelo
+  (`league_zone_fg`), sin tocar la base de datos.
 
 Ejemplo de error (equipo sin partidos jugados, fuente desconocida,
 `home_team_id == away_team_id`, modelo inexistente, o modelos sin
@@ -150,19 +178,26 @@ ambos equipos por defecto (`diff_rest_days = 0`) -- se puede afinar con
   (`data/processed/basketball.db`) -- `GET /health`, `/model/info`,
   `/teams?source=nba`, un `POST /predict` real entre dos equipos NBA
   reales, `GET /model/info/shot`, `POST /predict_shot` real (aro y
-  triple de NBA, mas uno con `shot_type="desconocido"` de FEB) mas
-  peticiones mal formadas para comprobar los 400. Ejecutado de verdad
-  en esta sesion: `home_win_probability=0.4654` para Atlanta Hawks
-  (local) - Boston Celtics (visitante); para tiro (modelo con 11
-  fuentes, accuracy=0.632/AUC=0.654), `make_probability=0.9457` junto
-  al aro de NBA vs `0.0018` en un triple muy de frente y justo pasada
-  la linea -- el primero es razonable, el segundo probablemente
-  refleja mas el AUC modesto del modelo que la realidad del baloncesto
-  (deberia rondar 30-35%, no 0.2%) -- limitacion real del modelo
-  (features limitadas a distancia/angulo/zona/tipo/fuente, sin contexto
-  del defensor ni del tirador), no un bug de como el API lo sirve. No
-  se ha comprobado ningun numero contra una casa de apuestas ni fuente
-  externa (no es esa la funcion de esta prueba).
+  triple de NBA, uno con `shot_type="desconocido"` de FEB, y uno con
+  `player_id` real de NBA) mas peticiones mal formadas para comprobar
+  los 400. Ejecutado de verdad en esta sesion (2026-09-21, tras añadir
+  el prior de jugador -- ver mas abajo): `home_win_probability=0.4654`
+  para Atlanta Hawks (local) - Boston Celtics (visitante); para tiro
+  (modelo con 11 fuentes + prior de jugador, accuracy=0.633/
+  AUC=0.658, sube desde 0.632/0.654 sin el prior), `make_probability=
+  0.9764` junto al aro de NBA (jugador generico, `player_prior_fg=
+  0.6563`, el FG% de liga de esa zona) vs `0.9782` para el mismo tiro
+  con `player_id="1628969"` (Mikal Bridges, `player_prior_fg=0.7218`,
+  su propio acierto real de aro es mayor que la media de liga -- el
+  modelo SI reacciona al prior de jugador, no es un campo decorativo).
+  El triple de referencia sale `0.0016` (muy de frente y justo pasada
+  la linea) -- sigue pareciendo bajo frente a un ~30-35% esperado;
+  seguramente refleja mas el AUC modesto del modelo en esa zona/angulo
+  concreto que la realidad del baloncesto, una limitacion real (el
+  modelo no tiene contexto de defensor/tirador especifico mas alla del
+  prior de zona) no un bug del API. No se ha comprobado ningun numero
+  contra una casa de apuestas ni fuente externa (no es esa la funcion
+  de esta prueba).
 - **Calibracion y limpieza de las 7 competiciones FEB** (sesion
   2026-09-20/21): la calibracion de coordenadas se valido con la
   distribucion real de distancias al aro (pico junto al aro, valle

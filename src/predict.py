@@ -36,7 +36,9 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from src.features import SHOT_COORD_CALIBRATION, _classify_zone, build_team_game_features
+from src.features import (
+    SHOT_COORD_CALIBRATION, SHOT_PRIOR_K_SHRINK, _classify_zone, build_team_game_features,
+)
 from src.features_pregame import ROLLING_STAT_COLS
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -60,7 +62,9 @@ _model_cache: dict[str, object] = {}
 # (ver SHOT_COORD_CALIBRATION en src/features.py y la nota "AMPLIACION
 # 2026-09-20" en train_shot.py sobre por que FEB queda fuera pese a
 # tener tiros reales guardados).
-SHOT_FEATURE_COLS: list[str] = ["dist_m", "angle_deg", "zone", "shot_type", "source"]
+SHOT_FEATURE_COLS: list[str] = [
+    "dist_m", "angle_deg", "player_prior_fg", "player_prior_n_log", "zone", "shot_type", "source",
+]
 
 # Competiciones FEB (FebSource): su API no reporta el tipo de tiro (2/3)
 # por tiro suelto, a diferencia de NBA/Euroliga/EuroCup/NextGen -- ver
@@ -252,12 +256,81 @@ def predict_game(
     }
 
 
+def _league_zone_fg(metadata: dict, source: str, zone: str) -> float:
+    """FG% de liga para (source, zone) segun el snapshot guardado en
+    models/shot_make_metadata.json ("league_zone_fg", escrito por
+    train_shot.py -- ver su docstring y add_shot_priors() en
+    src/features.py). Usado como ancla del encogido bayesiano del prior
+    de un jugador, y como el prior en si cuando no se pasa player_id
+    (equivale a "jugador medio de esa liga en esa zona"). Si el snapshot
+    no tiene esa combinacion (modelo entrenado antes de esta funcion, o
+    zona sin ningun tiro real todavia en esa fuente) se avisa con un
+    PredictionError en vez de adivinar un numero -- mismo criterio "avisa
+    y no adivina" del resto del proyecto.
+    """
+    for row in metadata.get("league_zone_fg", []):
+        if row.get("source") == source and row.get("zone") == zone:
+            return float(row["fg_pct"])
+    raise PredictionError(
+        f"El modelo de tiro no tiene FG% de liga guardado para "
+        f"source={source!r}/zone={zone!r} -- reentrena con train_shot.py "
+        f"(version actual, que guarda 'league_zone_fg' en la metadata)."
+    )
+
+
+def _player_zone_prior(
+    conn: sqlite3.Connection, source: str, player_id: str, zone: str,
+    league_fg: float, k_shrink: float,
+) -> tuple[float, float]:
+    """Prior EN VIVO de un jugador concreto en una zona: replica la misma
+    formula de encogido que add_shot_priors() (src/features.py) usa al
+    entrenar, pero sobre TODO el historico disponible AHORA MISMO en
+    `shots` (no hay fuga de datos aqui -- a diferencia del entrenamiento,
+    esto predice un tiro HIPOTETICO futuro, asi que usar todo el
+    historico pasado real es exactamente correcto, mismo criterio que ya
+    aplica predict_game()/latest_team_features() con equipos).
+
+    `zone` no esta guardada en la tabla `shots` (se deriva de
+    loc_x/loc_y con SHOT_COORD_CALIBRATION, igual que build_shot_
+    features()) -- se recalculan las coordenadas de TODOS los tiros de
+    este jugador en esta fuente y se filtra a la zona pedida. El volumen
+    tipico por jugador (cientos de tiros, no millones) hace que esto sea
+    barato para una peticion suelta del API; no compensa reconstruir el
+    dataset completo de 2M+ tiros solo para esto.
+    """
+    rows = conn.execute(
+        "SELECT loc_x, loc_y, made FROM shots WHERE source = ? AND player_id = ?",
+        (source, player_id),
+    ).fetchall()
+    if not rows:
+        return league_fg, 0.0
+
+    calib = SHOT_COORD_CALIBRATION[source]
+    makes = 0
+    atts = 0
+    for loc_x, loc_y, made in rows:
+        x_m, y_m = calib["to_meters"](loc_x, loc_y)
+        d = math.hypot(x_m, y_m)
+        z = _classify_zone(d, x_m, calib["three_pt_arc_m"], calib["three_pt_corner_m"])
+        if z != zone:
+            continue
+        atts += 1
+        makes += int(made)
+
+    if atts == 0:
+        return league_fg, 0.0
+    prior_fg = (makes + k_shrink * league_fg) / (atts + k_shrink)
+    return prior_fg, math.log1p(atts)
+
+
 def shot_make_probability(
     source: str,
     x_m: float,
     y_m: float,
     shot_type: str,
     model_name: str = "xgboost",
+    conn: sqlite3.Connection | None = None,
+    player_id: str | None = None,
 ) -> dict:
     """P(made) de un tiro HIPOTETICO, con el modelo de train_shot.py.
 
@@ -273,18 +346,38 @@ def shot_make_probability(
     SOURCES_WITHOUT_REPORTED_SHOT_TYPE) exigen shot_type="desconocido"
     en su lugar -- su fuente no reporta un tipo real por tiro.
 
+    player_id (AÑADIDO 2026-09-21, OPCIONAL): identificador REAL de
+    jugador en esa `source` (mismo id que la columna `player_id` de
+    `shots`/`players`). Si se pasa, el modelo usa el prior de acierto de
+    ESE jugador en la zona del tiro (ver _player_zone_prior(), calculado
+    en vivo con todo su historico disponible ahora mismo -- no es una
+    fuga de datos, es un tiro hipotetico futuro, igual que
+    predict_game()/latest_team_features() usan todo el historico de un
+    equipo). Requiere `conn` -- sin `conn`, pasar player_id lanza
+    PredictionError en vez de ignorarlo en silencio. Si NO se pasa
+    player_id, se usa el FG% medio de LIGA de esa (source, zone)
+    (equivale a predecir para un "jugador medio"), que no necesita
+    `conn` (viene del snapshot guardado en la metadata del modelo).
+
     Reutiliza _classify_zone() y los umbrales three_pt_*_m de
     SHOT_COORD_CALIBRATION (src/features.py) -- misma formula de zona
     que el dataset de entrenamiento, no una copia.
 
     Lanza PredictionError si `source` no tiene coordenadas calibradas,
-    si shot_type no es "2"/"3", o si el modelo entrenado no vio esa
-    fuente en su propio entrenamiento -- este ultimo caso NO fallaria
-    con una excepcion de sklearn (OneHotEncoder(handle_unknown="ignore")
-    simplemente la trataria como todo-ceros), pero seria una prediccion
-    silenciosa sobre una categoria que el modelo nunca aprendio, asi que
-    se rechaza explicitamente ("avisa y no adivina").
+    si shot_type no es "2"/"3", si el modelo entrenado no vio esa fuente
+    en su propio entrenamiento (este ultimo caso NO fallaria con una
+    excepcion de sklearn -- OneHotEncoder(handle_unknown="ignore")
+    simplemente la trataria como todo-ceros, una prediccion silenciosa
+    sobre una categoria que el modelo nunca aprendio, asi que se
+    rechaza explicitamente, "avisa y no adivina"), o si se pasa
+    player_id sin conn.
     """
+    if player_id is not None and conn is None:
+        raise PredictionError(
+            "shot_make_probability(): se paso player_id sin conn -- hace falta la "
+            "conexion a la base de datos para consultar el historico real de ese "
+            "jugador (ver _player_zone_prior())."
+        )
     if source not in SHOT_COORD_CALIBRATION:
         raise PredictionError(
             f"Sin coordenadas de tiro calibradas para source={source!r}. "
@@ -322,9 +415,20 @@ def shot_make_probability(
     angle_deg = math.degrees(math.atan2(abs(x_m), y_m))
     zone = _classify_zone(dist_m, x_m, calib["three_pt_arc_m"], calib["three_pt_corner_m"])
 
+    metadata = load_shot_metadata()
+    league_fg = _league_zone_fg(metadata, source, zone)
+    k_shrink = float(metadata.get("shot_prior_k_shrink", SHOT_PRIOR_K_SHRINK))
+    if player_id is not None:
+        player_prior_fg, player_prior_n_log = _player_zone_prior(
+            conn, source, player_id, zone, league_fg, k_shrink,
+        )
+    else:
+        player_prior_fg, player_prior_n_log = league_fg, 0.0
+
     row = {
-        "dist_m": dist_m, "angle_deg": angle_deg, "zone": zone,
-        "shot_type": shot_type, "source": source,
+        "dist_m": dist_m, "angle_deg": angle_deg,
+        "player_prior_fg": player_prior_fg, "player_prior_n_log": player_prior_n_log,
+        "zone": zone, "shot_type": shot_type, "source": source,
     }
     X = pd.DataFrame([row], columns=SHOT_FEATURE_COLS)
 
@@ -340,5 +444,7 @@ def shot_make_probability(
         "zone": zone,
         "shot_type": shot_type,
         "model": model_name,
+        "player_id": player_id,
+        "player_prior_fg": round(player_prior_fg, 4),
         "make_probability": round(make_prob, 4),
     }

@@ -196,6 +196,11 @@ def fit_dummy_shot_model():
     X = pd.DataFrame({
         "dist_m": rng.uniform(0, 8, n),
         "angle_deg": rng.uniform(0, 90, n),
+        # player_prior_fg/player_prior_n_log añadidas 2026-09-21 -- ver
+        # add_shot_priors() en src/features.py y _player_zone_prior() en
+        # src/predict.py. Mismas columnas que SHOT_FEATURE_COLS real.
+        "player_prior_fg": rng.uniform(0.2, 0.7, n),
+        "player_prior_n_log": rng.uniform(0.0, 5.0, n),
         "zone": rng.choice(["aro", "media_larga", "triple_arco"], n),
         "shot_type": rng.choice(["2", "3"], n),
         "source": rng.choice(["nba", "euroleague"], n),
@@ -203,7 +208,7 @@ def fit_dummy_shot_model():
     y = (X["dist_m"] < 3).astype(int).to_numpy()
     pipe = Pipeline([
         ("pre", ColumnTransformer([
-            ("num", StandardScaler(), ["dist_m", "angle_deg"]),
+            ("num", StandardScaler(), ["dist_m", "angle_deg", "player_prior_fg", "player_prior_n_log"]),
             ("cat", OneHotEncoder(handle_unknown="ignore"), ["zone", "shot_type", "source"]),
         ])),
         ("clf", LogisticRegression()),
@@ -232,7 +237,14 @@ def test_shot_mechanics() -> None:
     # aparece aqui a proposito).
     import json
     with open(tmp_dir / "shot_make_metadata.json", "w", encoding="utf-8") as f:
-        json.dump({"sources": ["nba", "euroleague", "feb"]}, f)
+        json.dump({
+            "sources": ["nba", "euroleague", "feb"],
+            "league_zone_fg": [
+                {"source": "nba", "zone": "aro", "fg_pct": 0.65},
+                {"source": "feb", "zone": "aro", "fg_pct": 0.60},
+            ],
+            "shot_prior_k_shrink": 20.0,
+        }, f)
 
     result = predict_mod.shot_make_probability(
         source="nba", x_m=0.5, y_m=1.0, shot_type="2", model_name="logreg",
@@ -246,6 +258,47 @@ def test_shot_mechanics() -> None:
     )
     print(f"  shot_make_probability(feb, shot_type='desconocido'): {result_feb}")
     assert 0.0 <= result_feb["make_probability"] <= 1.0
+    assert result_feb["player_prior_fg"] == 0.60, (
+        f"sin player_id deberia usar el FG% de liga de la metadata (0.60), "
+        f"salio {result_feb['player_prior_fg']}"
+    )
+
+    # player_id (AÑADIDO 2026-09-21): base de datos SQLite de prueba real
+    # (esquema real via get_connection(), no una fabricada a mano) con
+    # unos pocos tiros de un jugador "especialista de aro" (siempre
+    # metido) -- el prior de ese jugador deberia acercarse a su propio
+    # acierto (mucho mas alto que el 0.65 de liga), no quedarse en la
+    # media de liga.
+    shot_db_path = tmp_dir / "shots_test.db"
+    shot_conn = get_connection(shot_db_path)
+    shot_conn.executemany(
+        "INSERT INTO shots (source, game_id, player_id, team_id, loc_x, loc_y, made, shot_type) "
+        "VALUES ('nba', ?, '203999', 'ATL', 0, 5, 1, '2')",
+        [(f"g{i}",) for i in range(1, 21)],  # 20 tiros de aro, TODOS metidos
+    )
+    shot_conn.commit()
+
+    result_player = predict_mod.shot_make_probability(
+        source="nba", x_m=0.5, y_m=1.0, shot_type="2", model_name="logreg",
+        conn=shot_conn, player_id="203999",
+    )
+    print(f"  shot_make_probability(nba, player_id='203999', especialista de aro): {result_player}")
+    assert result_player["player_id"] == "203999"
+    assert result_player["player_prior_fg"] > 0.65, (
+        f"20/20 previos deberia encoger poco y quedar bastante por encima del "
+        f"0.65 de liga, salio {result_player['player_prior_fg']}"
+    )
+
+    result_player_sin_historial = predict_mod.shot_make_probability(
+        source="nba", x_m=0.5, y_m=1.0, shot_type="2", model_name="logreg",
+        conn=shot_conn, player_id="000000",  # jugador sin ningun tiro guardado
+    )
+    print(f"  shot_make_probability(nba, player_id sin historial): {result_player_sin_historial}")
+    assert result_player_sin_historial["player_prior_fg"] == 0.65, (
+        f"un jugador sin tiros previos deberia caer al FG% de liga (0.65), "
+        f"salio {result_player_sin_historial['player_prior_fg']}"
+    )
+    shot_conn.close()
 
     for label, fn in [
         ("fuente sin calibrar (acb)",
@@ -256,6 +309,8 @@ def test_shot_mechanics() -> None:
          lambda: predict_mod.shot_make_probability("eurocup", 1.0, 1.0, "2", model_name="logreg")),
         ("feb con shot_type real en vez de 'desconocido'",
          lambda: predict_mod.shot_make_probability("feb", 1.0, 1.0, "2", model_name="logreg")),
+        ("player_id sin conn",
+         lambda: predict_mod.shot_make_probability("nba", 1.0, 1.0, "2", model_name="logreg", player_id="203999")),
     ]:
         try:
             fn()
@@ -373,6 +428,21 @@ def test_real_api_if_available() -> None:
         print(f"  POST /predict_shot (acb, sin calibrar) -> "
               f"{r_uncalibrated.status_code} {r_uncalibrated.get_json()}")
         assert r_uncalibrated.status_code == 400
+
+        # player_id real (AÑADIDO 2026-09-21): mismo tiro junto al aro que
+        # r_rim de arriba, pero con un jugador real de la base de datos
+        # (Mikal Bridges, "1628969", el de mas partidos en player_stats
+        # para nba a fecha de esta sesion) -- el prior deberia ser SU
+        # acierto real en "aro" (via _player_zone_prior(), calculado en
+        # vivo contra la base de datos real), no el de liga generico.
+        r_rim_player = client.post("/predict_shot", json={
+            "source": "nba", "x_m": 0.3, "y_m": 0.5, "shot_type": "2",
+            "player_id": "1628969",
+        })
+        print(f"  POST /predict_shot (nba, junto al aro, player_id='1628969') -> "
+              f"{r_rim_player.status_code} {r_rim_player.get_json()}")
+        assert r_rim_player.status_code == 200
+        assert r_rim_player.get_json()["player_id"] == "1628969"
     else:
         print("  (sin modelo de tiro real en models/ todavia -- ejecuta 'python train_shot.py' "
               "para probar /predict_shot. No es un fallo.)")

@@ -401,3 +401,142 @@ def zone_fg_pct(shot_features: pd.DataFrame, by: list[str] | None = None) -> pd.
     )
     out["fg_pct"] = out["aciertos"] / out["intentos"]
     return out.reset_index()
+
+
+# Peso (en intentos "virtuales" de liga) del encogido bayesiano de
+# add_shot_priors() -- compartido con src/predict.py para que el prior
+# calculado EN VIVO en una prediccion use exactamente la misma formula
+# que el usado al entrenar (train_shot.py), nunca dos constantes que
+# puedan divergir.
+SHOT_PRIOR_K_SHRINK = 20.0
+
+
+def add_shot_priors(
+    shots: pd.DataFrame, games: pd.DataFrame, k_shrink: float = SHOT_PRIOR_K_SHRINK,
+) -> pd.DataFrame:
+    """Añade `player_prior_fg` y `player_prior_n_log` a `shots` (salida de
+    build_shot_features()): el acierto/volumen PREVIO de cada jugador en
+    SU ZONA, calculados usando solo partidos ANTERIORES al del propio
+    tiro -- nunca el propio partido ni partidos futuros. Mismo criterio
+    "sin fuga de datos" que features_pregame.py aplica al modelo de
+    resultado de partido (shift(1).expanding().mean()), aqui llevado al
+    nivel de tiro/jugador.
+
+    MOTIVACION (verificado en datos reales antes de escribir esto, sesion
+    2026-09-21, no adivinado): agrupando los 2.45M tiros de las 11
+    fuentes entrenables-y-calibradas por (source, player_id) dentro de la
+    zona "aro" con >=50 intentos, la desviacion tipica REAL del FG% entre
+    jugadores es ~4x mayor que la esperable solo por ruido binomial al
+    mismo volumen (0.091 vs 0.022 con n medio=441); en "triple_arco" es
+    ~2.3x (0.050 vs 0.022, n medio=478). zone/dist_m/angle_deg por si
+    solos no explican esa variacion -- hay señal real de jugador
+    (habilidad y/o rol) que el modelo anterior (solo geometria +
+    shot_type + source) no podia aprovechar.
+
+    COMO SE CALCULA (todo por PARTIDO, nunca por tiro suelto dentro de un
+    partido -- un partido entero comparte el mismo prior, coherente con
+    que esa informacion ya se conocia ANTES de que el partido empezara):
+    1. Se agrega `shots` a nivel (source, player_id, zone, game_id):
+       intentos y aciertos de ESE jugador en ESA zona en ESE partido.
+    2. Se ordena por `games.date` (ya parseada por quien llama -- mismo
+       parseo de fechas mixtas que chronological_split_by_game() en
+       train_shot.py, format="mixed"/utc=True) y se acumula (cumsum)
+       DESPLAZADO una posicion: el prior de un partido nunca incluye ese
+       propio partido.
+    3. Lo mismo a nivel (source, zone, game_id) pero sumando TODOS los
+       jugadores de esa fuente -- "acierto de liga en esa zona hasta ese
+       partido", tambien desplazado.
+    4. El prior final del jugador se ENCOGE hacia el prior de liga (forma
+       estandar beta-binomial/James-Stein) con peso `k_shrink` (intentos
+       "virtuales" de liga que se le suman): con pocos intentos previos
+       el prior queda cerca de la media de liga, con muchos se acerca al
+       acierto realmente observado de ese jugador --
+           player_prior_fg = (prior_makes + k_shrink * prior_league_fg)
+                              / (prior_atts + k_shrink)
+    5. `player_prior_n_log` = log1p(prior_atts) -- volumen previo del
+       jugador en esa zona, en escala logaritmica: una feature separada
+       de la habilidad (dos jugadores con el mismo FG% previo pero muy
+       distinto volumen no son igual de fiables, y el volumen en si
+       correlaciona con rol -- un pivot con mucho volumen de "aro" no es
+       lo mismo que un exterior con 3 tiros de aro sueltos).
+
+    Los PRIMEROS partidos de cada (source, zone) -- sin ningun partido
+    anterior de esa fuente -- se quedan sin prior de liga real (0
+    intentos previos); esos pocos casos usan como prior de liga el FG%
+    global de esa (source, zone) sobre TODO `shots` (la unica fuga de
+    datos real de esta funcion, limitada a un puñado de partidos por
+    fuente al principio de su historico, nunca al grueso de filas).
+
+    `games` debe tener las columnas (source, game_id, date), con `date`
+    YA parseada a un tipo ordenable (mismo formato que produce
+    chronological_split_by_game() en train_shot.py) -- esta funcion no
+    repite ese parseo.
+    """
+    needed_shot_cols = {"source", "game_id", "player_id", "zone", "made"}
+    missing = needed_shot_cols - set(shots.columns)
+    if missing:
+        raise ValueError(f"add_shot_priors(): faltan columnas en shots: {sorted(missing)}")
+    needed_game_cols = {"source", "game_id", "date"}
+    if not needed_game_cols <= set(games.columns):
+        raise ValueError("add_shot_priors(): games debe tener columnas source, game_id, date")
+
+    sd = shots.merge(games[["source", "game_id", "date"]], on=["source", "game_id"], how="left")
+    n_sin_fecha = sd["date"].isna().sum()
+    if n_sin_fecha:
+        raise ValueError(
+            f"add_shot_priors(): {n_sin_fecha} tiros sin fecha de partido tras el merge con "
+            f"`games` -- revisar que `games` cubra todos los (source, game_id) de `shots`."
+        )
+
+    # 1) nivel jugador-zona-partido: intentos/aciertos de ESE jugador en
+    # ESA zona en ESE partido, acumulados y desplazados por fecha.
+    player_game = (
+        sd.groupby(["source", "player_id", "zone", "game_id", "date"])
+        .agg(makes=("made", "sum"), atts=("made", "size"))
+        .reset_index()
+        .sort_values(["source", "player_id", "zone", "date", "game_id"])
+    )
+    g = player_game.groupby(["source", "player_id", "zone"])
+    player_game["prior_makes"] = g["makes"].cumsum() - player_game["makes"]
+    player_game["prior_atts"] = g["atts"].cumsum() - player_game["atts"]
+
+    # 2) nivel liga-zona-partido: mismo patron pero sumando TODOS los
+    # jugadores de esa fuente, para tener el prior de liga hacia el que
+    # encoger el prior del jugador.
+    league_game = (
+        sd.groupby(["source", "zone", "game_id", "date"])
+        .agg(makes=("made", "sum"), atts=("made", "size"))
+        .reset_index()
+        .sort_values(["source", "zone", "date", "game_id"])
+    )
+    lg = league_game.groupby(["source", "zone"])
+    league_game["prior_league_makes"] = lg["makes"].cumsum() - league_game["makes"]
+    league_game["prior_league_atts"] = lg["atts"].cumsum() - league_game["atts"]
+
+    fallback_fg = sd.groupby(["source", "zone"])["made"].mean().rename("fallback_fg")
+    league_game = league_game.merge(fallback_fg, on=["source", "zone"], how="left")
+    league_game["prior_league_fg"] = np.where(
+        league_game["prior_league_atts"] > 0,
+        league_game["prior_league_makes"] / league_game["prior_league_atts"].replace(0, np.nan),
+        league_game["fallback_fg"],
+    )
+
+    # 3) une el prior de liga al de jugador y aplica el encogido.
+    player_game = player_game.merge(
+        league_game[["source", "zone", "game_id", "prior_league_fg"]],
+        on=["source", "zone", "game_id"], how="left",
+    )
+    player_game["player_prior_fg"] = (
+        player_game["prior_makes"] + k_shrink * player_game["prior_league_fg"]
+    ) / (player_game["prior_atts"] + k_shrink)
+    player_game["player_prior_n_log"] = np.log1p(player_game["prior_atts"])
+
+    # 4) reparte el prior (uno por partido) a TODOS los tiros de ese
+    # partido -- toda esa informacion ya se conocia antes de que
+    # empezara, asi que todos sus tiros comparten el mismo valor.
+    out = sd.merge(
+        player_game[["source", "player_id", "zone", "game_id",
+                      "player_prior_fg", "player_prior_n_log"]],
+        on=["source", "player_id", "zone", "game_id"], how="left",
+    )
+    return out.drop(columns=["date"])

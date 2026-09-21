@@ -62,18 +62,25 @@ Endpoints:
 
     POST /predict_shot
         Body JSON: {"source": "nba", "x_m": 2.5, "y_m": 5.0,
-        "shot_type": "2", "model": "xgboost" (opcional)}. x_m/y_m son
-        METROS con origen en el aro (no las unidades nativas de cada
-        scraper -- ver docstring de src/predict.py:shot_make_probability()).
-        SOLO fuentes con coordenadas de tiro calibradas Y con las que
-        se entreno de verdad el modelo -- GET /model/info/shot dice
-        cuales son ahora mismo (11 a fecha de esta version: nba,
-        euroleague, eurocup, nextgen, feb, lfendesa, lfchallenge, lf2,
-        segundafeb, tercerafeb, copaespaa). Para las 7 competiciones FEB,
-        `shot_type` debe ser "desconocido" en vez de "2"/"3" -- su fuente
-        no reporta el tipo real por tiro suelto (ver
-        SOURCES_WITHOUT_REPORTED_SHOT_TYPE en src/predict.py). Devuelve
-        make_probability mas la zona/distancia/angulo ya calculados.
+        "shot_type": "2", "model": "xgboost" (opcional), "player_id":
+        "203999" (opcional, AÑADIDO 2026-09-21)}. x_m/y_m son METROS con
+        origen en el aro (no las unidades nativas de cada scraper -- ver
+        docstring de src/predict.py:shot_make_probability()). SOLO
+        fuentes con coordenadas de tiro calibradas Y con las que se
+        entreno de verdad el modelo -- GET /model/info/shot dice cuales
+        son ahora mismo (11 a fecha de esta version: nba, euroleague,
+        eurocup, nextgen, feb, lfendesa, lfchallenge, lf2, segundafeb,
+        tercerafeb, copaespaa). Para las 7 competiciones FEB, `shot_type`
+        debe ser "desconocido" en vez de "2"/"3" -- su fuente no reporta
+        el tipo real por tiro suelto (ver SOURCES_WITHOUT_REPORTED_SHOT_
+        TYPE en src/predict.py). `player_id` (mismo id real que la
+        columna player_id de `shots`/`players`, ver GET /teams o la app
+        de exploracion): si se pasa, la prediccion usa el acierto
+        historico REAL de ese jugador en la zona del tiro en vez del
+        acierto medio de liga -- ver _player_zone_prior() en
+        src/predict.py. Devuelve make_probability mas la zona/distancia/
+        angulo ya calculados y player_prior_fg (el prior de jugador o de
+        liga usado, segun se haya pasado player_id o no).
 """
 from __future__ import annotations
 
@@ -204,6 +211,8 @@ def predict_shot():
     except (TypeError, ValueError):
         return jsonify({"error": "x_m/y_m deben ser numericos."}), 400
 
+    player_id = data.get("player_id")
+    conn = db() if player_id is not None else None
     try:
         result = shot_make_probability(
             source=data["source"],
@@ -211,9 +220,14 @@ def predict_shot():
             y_m=y_m,
             shot_type=str(data["shot_type"]),
             model_name=data.get("model", "xgboost"),
+            conn=conn,
+            player_id=str(player_id) if player_id is not None else None,
         )
     except PredictionError as exc:
         return jsonify({"error": str(exc)}), 400
+    finally:
+        if conn is not None:
+            conn.close()
 
     return jsonify(result)
 
