@@ -157,6 +157,7 @@ def game_outcome_env(tmp_path):
         "xgboost": tmp_path / "game_outcome_xgb.joblib",
     }
     predict_mod._model_cache.clear()
+    predict_mod._metadata_cache.clear()
     model = _fit_dummy_model(predict_mod.FEATURE_COLS)
     joblib.dump(model, predict_mod._MODEL_FILES["logreg"])
     joblib.dump(model, predict_mod._MODEL_FILES["xgboost"])

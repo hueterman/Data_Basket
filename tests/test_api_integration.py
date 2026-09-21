@@ -30,6 +30,7 @@ def real_predict_mod():
         "xgboost": real_models_dir / "game_outcome_xgb.joblib",
     }
     predict_mod._model_cache.clear()
+    predict_mod._metadata_cache.clear()
 
     if not predict_mod.available_models():
         pytest.skip(

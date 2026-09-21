@@ -112,12 +112,26 @@ def _load_cached(cache: dict[str, object], name: str, files: dict[str, Path],
     return cache[name]
 
 
+_metadata_cache: dict[str, dict] = {}
+
+
 def _load_metadata_file(filename: str, train_script: str) -> dict:
-    path = MODELS_DIR / filename
-    if not path.exists():
-        raise PredictionError(f"No existe {filename} todavia -- ejecuta '{train_script}' primero.")
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    """Cachea el JSON ya parseado en memoria de proceso (AÑADIDO
+    2026-09-21) -- mismo criterio que _load_cached() para los modelos:
+    el metadata no cambia salvo que reentrenes, y reentrenar ya
+    requiere reiniciar el proceso para recoger los .joblib nuevos (ver
+    load_model()), asi que cachear esto tambien no introduce ninguna
+    inconsistencia que no existiera ya. Devuelve una COPIA superficial
+    del dict cacheado -- api/app.py hace `metadata["available_models"]
+    = ...` sobre el valor devuelto (ver GET /model/info*); sin la copia,
+    esa mutacion se colaria en el propio cache."""
+    if filename not in _metadata_cache:
+        path = MODELS_DIR / filename
+        if not path.exists():
+            raise PredictionError(f"No existe {filename} todavia -- ejecuta '{train_script}' primero.")
+        with open(path, encoding="utf-8") as f:
+            _metadata_cache[filename] = json.load(f)
+    return dict(_metadata_cache[filename])
 
 
 def available_models() -> list[str]:

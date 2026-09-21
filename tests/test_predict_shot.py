@@ -65,6 +65,7 @@ def shot_env(tmp_path):
         "xgboost": tmp_path / "shot_make_xgb.joblib",
     }
     predict_mod._shot_model_cache.clear()
+    predict_mod._metadata_cache.clear()
     model = _fit_dummy_shot_model()
     joblib.dump(model, predict_mod._SHOT_MODEL_FILES["logreg"])
     joblib.dump(model, predict_mod._SHOT_MODEL_FILES["xgboost"])
