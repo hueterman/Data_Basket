@@ -1,0 +1,620 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Data Basket API",
+    "version": "1.0.0",
+    "description": "API REST de solo lectura sobre data/processed/basketball.db: ficheros de equipos por fuente, y dos modelos entrenados (train.py / train_shot.py) servidos en vivo -- probabilidad de victoria de un partido hipotetico y probabilidad de que un tiro entre. Ninguna ruta escribe en la base de datos (ver api/README.md para el detalle completo, incluido cuando cada fuente esta disponible en cada modelo)."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Servidor donde corra api/app.py (ver api/README.md, 'Despliegue para demos')"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Comprobacion basica de que el proceso responde",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/model/info": {
+      "get": {
+        "summary": "Metadata del ultimo entrenamiento del modelo de RESULTADO DE PARTIDO (train.py)",
+        "responses": {
+          "200": {
+            "description": "Metadata real del ultimo train.py",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameOutcomeMetadata"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No se ha ejecutado train.py todavia",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/model/info/shot": {
+      "get": {
+        "summary": "Metadata del ultimo entrenamiento del modelo de PROBABILIDAD DE TIRO (train_shot.py)",
+        "responses": {
+          "200": {
+            "description": "Metadata real del ultimo train_shot.py",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShotMakeMetadata"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No se ha ejecutado train_shot.py todavia",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/teams": {
+      "get": {
+        "summary": "Equipos de una fuente concreta",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "example": "nba"
+            },
+            "description": "Identificador real de fuente (nba, euroleague, eurocup, nextgen, feb, lfendesa, lfchallenge, lf2, segundafeb, tercerafeb, copaespaa, acb, wnba, cbb...)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de equipos (vacia si la fuente no tiene datos)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "team_id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falta el parametro 'source'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predict": {
+      "post": {
+        "summary": "Probabilidad de victoria de un partido HIPOTETICO entre dos equipos",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PredictRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Prediccion real",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Campos obligatorios ausentes, home_team_id == away_team_id, equipo/fuente/modelo desconocido, o modelos sin entrenar todavia",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predict_shot": {
+      "post": {
+        "summary": "Probabilidad de que un tiro HIPOTETICO entre, en unas coordenadas concretas",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PredictShotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Prediccion real",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictShotResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Campos obligatorios ausentes, source sin coordenadas calibradas, source no entrenada, shot_type invalido (incluye el caso FEB: exige 'desconocido' en vez de '2'/'3'), o player_id sin datos suficientes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "PredictRequest": {
+        "type": "object",
+        "required": [
+          "source",
+          "home_team_id",
+          "away_team_id"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "example": "nba"
+          },
+          "home_team_id": {
+            "type": "string",
+            "example": "1610612737"
+          },
+          "away_team_id": {
+            "type": "string",
+            "example": "1610612738"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "logreg",
+              "xgboost"
+            ],
+            "default": "xgboost"
+          },
+          "home_rest_days": {
+            "type": "number",
+            "default": 0.0
+          },
+          "away_rest_days": {
+            "type": "number",
+            "default": 0.0
+          }
+        }
+      },
+      "PredictResponse": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "home_team_id": {
+            "type": "string"
+          },
+          "away_team_id": {
+            "type": "string"
+          },
+          "home_season": {
+            "type": "string"
+          },
+          "away_season": {
+            "type": "string"
+          },
+          "home_games_played": {
+            "type": "integer"
+          },
+          "away_games_played": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "home_win_probability": {
+            "type": "number"
+          },
+          "away_win_probability": {
+            "type": "number"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "PredictShotRequest": {
+        "type": "object",
+        "required": [
+          "source",
+          "x_m",
+          "y_m",
+          "shot_type"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "example": "nba"
+          },
+          "x_m": {
+            "type": "number",
+            "description": "Metros desde el aro, eje horizontal (0 = centro)",
+            "example": 0.3
+          },
+          "y_m": {
+            "type": "number",
+            "description": "Metros desde el aro, eje vertical (0 = linea de fondo)",
+            "example": 0.5
+          },
+          "shot_type": {
+            "type": "string",
+            "description": "'2'/'3' salvo las 7 competiciones FEB, que exigen 'desconocido'",
+            "example": "2"
+          },
+          "model": {
+            "type": "string",
+            "enum": [
+              "logreg",
+              "xgboost"
+            ],
+            "default": "xgboost"
+          },
+          "player_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Opcional -- id real de jugador de esa source (ver /teams). Si se pasa, usa su acierto historico real en vez del de liga.",
+            "example": "1628969"
+          }
+        }
+      },
+      "PredictShotResponse": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "x_m": {
+            "type": "number"
+          },
+          "y_m": {
+            "type": "number"
+          },
+          "dist_m": {
+            "type": "number"
+          },
+          "angle_deg": {
+            "type": "number"
+          },
+          "zone": {
+            "type": "string",
+            "enum": [
+              "aro",
+              "pintura_corta",
+              "media_larga",
+              "triple_esquina",
+              "triple_arco"
+            ]
+          },
+          "shot_type": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "player_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "player_prior_fg": {
+            "type": "number",
+            "description": "Prior de acierto usado (del jugador si se paso player_id, si no el de liga de esa zona)"
+          },
+          "make_probability": {
+            "type": "number"
+          }
+        }
+      },
+      "GameOutcomeMetadata": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "feature_cols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "min_prior_games": {
+            "type": "integer"
+          },
+          "test_frac": {
+            "type": "number"
+          },
+          "n_train": {
+            "type": "integer"
+          },
+          "n_test": {
+            "type": "integer"
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "baseline": {
+                "type": "object",
+                "properties": {
+                  "accuracy": {
+                    "type": "number"
+                  },
+                  "log_loss": {
+                    "type": "number"
+                  },
+                  "roc_auc": {
+                    "type": "number"
+                  }
+                }
+              },
+              "logreg": {
+                "type": "object",
+                "properties": {
+                  "accuracy": {
+                    "type": "number"
+                  },
+                  "log_loss": {
+                    "type": "number"
+                  },
+                  "roc_auc": {
+                    "type": "number"
+                  }
+                }
+              },
+              "xgboost": {
+                "type": "object",
+                "properties": {
+                  "accuracy": {
+                    "type": "number"
+                  },
+                  "log_loss": {
+                    "type": "number"
+                  },
+                  "roc_auc": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "logreg_metrics_by_source": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "n": {
+                  "type": "integer"
+                },
+                "home_win_rate": {
+                  "type": "number"
+                },
+                "accuracy": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "available_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ShotMakeMetadata": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "feature_cols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "test_frac": {
+            "type": "number"
+          },
+          "n_train": {
+            "type": "integer"
+          },
+          "n_test": {
+            "type": "integer"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "baseline": {
+                "type": "object",
+                "properties": {
+                  "accuracy": {
+                    "type": "number"
+                  },
+                  "log_loss": {
+                    "type": "number"
+                  },
+                  "roc_auc": {
+                    "type": "number"
+                  }
+                }
+              },
+              "logreg": {
+                "type": "object",
+                "properties": {
+                  "accuracy": {
+                    "type": "number"
+                  },
+                  "log_loss": {
+                    "type": "number"
+                  },
+                  "roc_auc": {
+                    "type": "number"
+                  }
+                }
+              },
+              "xgboost": {
+                "type": "object",
+                "properties": {
+                  "accuracy": {
+                    "type": "number"
+                  },
+                  "log_loss": {
+                    "type": "number"
+                  },
+                  "roc_auc": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "sanity_check_by_zone": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "zone": {
+                  "type": "string"
+                },
+                "intentos": {
+                  "type": "integer"
+                },
+                "fg_pct_real": {
+                  "type": "number"
+                },
+                "prob_media_predicha": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "league_zone_fg": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source": {
+                  "type": "string"
+                },
+                "zone": {
+                  "type": "string"
+                },
+                "fg_pct": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "shot_prior_k_shrink": {
+            "type": "number"
+          },
+          "available_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

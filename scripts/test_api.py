@@ -348,6 +348,24 @@ def test_real_api_if_available() -> None:
     print(f"  GET /health -> {r.status_code} {r.get_json()}")
     assert r.status_code == 200
 
+    # Documentacion OpenAPI/Swagger (AÑADIDO 2026-09-21, punto 6 del
+    # roadmap) -- comprueba que el spec es JSON valido con los 6 paths
+    # reales y que /docs/ (Swagger UI) responde 200, no que el contenido
+    # sea perfecto (eso ya lo valida openapi-spec-validator aparte, ver
+    # api/README.md).
+    r = client.get("/openapi.json")
+    spec = r.get_json()
+    print(f"  GET /openapi.json -> {r.status_code} paths={sorted((spec or {}).get('paths', {}))}")
+    assert r.status_code == 200
+    expected_paths = {"/health", "/model/info", "/model/info/shot", "/teams", "/predict", "/predict_shot"}
+    assert expected_paths <= set(spec.get("paths", {})), (
+        f"faltan paths en openapi.json: {expected_paths - set(spec.get('paths', {}))}"
+    )
+
+    r = client.get("/docs/")
+    print(f"  GET /docs/ -> {r.status_code}")
+    assert r.status_code == 200
+
     r = client.get("/model/info")
     info = r.get_json()
     print(f"  GET /model/info -> {r.status_code} available_models={info.get('available_models')} "

@@ -40,6 +40,15 @@ Uso:
         $env:PRODUCTION=1; python api\app.py        (PowerShell)
 
 Endpoints:
+    GET  /docs
+        Interfaz interactiva de Swagger UI (AÑADIDO 2026-09-21) -- prueba
+        cada endpoint desde el navegador con formularios reales, en vez de
+        fabricar peticiones a mano con curl/Postman. Lee de /openapi.json.
+
+    GET  /openapi.json
+        El spec OpenAPI 3.0 en si (api/openapi.json), por si se quiere
+        importar en Postman/Insomnia o generar un cliente automaticamente.
+
     GET  /health
         {"status": "ok"} -- comprobacion basica de que el proceso responde.
 
@@ -101,7 +110,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
+from flask_swagger_ui import get_swaggerui_blueprint
 
 from src.pipeline.db import get_connection
 from src.predict import (
@@ -115,6 +125,28 @@ from src.predict import (
 )
 
 app = Flask(__name__)
+
+# Documentacion OpenAPI/Swagger (AÑADIDO 2026-09-21, punto 6 del roadmap):
+# api/openapi.json describe a mano los 6 endpoints reales (request/response
+# de verdad, no generado por introspeccion de las rutas Flask -- misma
+# disciplina "toda la logica real vive en src/, aqui solo rutas finas" no
+# aplica a documentacion, pero se mantiene sincronizado a mano con este
+# fichero, ver su comentario de cabecera). /openapi.json sirve el fichero
+# tal cual; /docs monta la interfaz interactiva de Swagger UI (probar cada
+# endpoint desde el navegador) apuntando a esa URL.
+SWAGGER_URL = "/docs"
+OPENAPI_URL = "/openapi.json"
+
+
+@app.route(OPENAPI_URL)
+def openapi_spec():
+    return send_from_directory(Path(__file__).resolve().parent, "openapi.json")
+
+
+app.register_blueprint(
+    get_swaggerui_blueprint(SWAGGER_URL, OPENAPI_URL, config={"app_name": "Data Basket API"}),
+    url_prefix=SWAGGER_URL,
+)
 
 
 def db():

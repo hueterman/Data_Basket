@@ -30,6 +30,25 @@ Escucha en <http://127.0.0.1:5060>. Puerto configurable sin tocar el
 codigo con la variable de entorno `PORT` (p. ej. `PORT=5061 python
 api/app.py`), igual que `app/app.py`.
 
+## Documentacion interactiva (Swagger UI)
+
+Con el servidor arrancado, <http://127.0.0.1:5060/docs/> abre una
+interfaz donde se puede ver cada endpoint (parametros, forma real del
+JSON de entrada/salida, codigos de error) y PROBARLO desde el propio
+navegador ("Try it out"), sin fabricar peticiones a mano con curl o
+Postman. El spec en si (OpenAPI 3.0, escrito a mano en
+`api/openapi.json` para que describa el comportamiento REAL de cada
+ruta, no algo generado por introspeccion) esta en
+<http://127.0.0.1:5060/openapi.json> -- importable directamente en
+Postman/Insomnia, o para generar un cliente automatico en otro
+lenguaje.
+
+**Mantenimiento:** `api/openapi.json` NO se regenera solo -- si se
+añade/cambia un campo de request o response en `api/app.py` o
+`src/predict.py`, hay que actualizar el spec a mano en el mismo commit
+(el propio comentario de cabecera en `api/app.py`, junto al
+registro de Swagger UI, lo recuerda).
+
 ## Despliegue para demos (sin hosting fijo todavia)
 
 Punto #5 del roadmap: por ahora solo hace falta poder ENSEÑAR el API
