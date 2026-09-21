@@ -246,6 +246,24 @@ coeficientes/importancias que imprime `train.py`) se asume igual para
 ambos equipos por defecto (`diff_rest_days = 0`) -- se puede afinar con
 `home_rest_days`/`away_rest_days` en el body si interesa.
 
+**Arrastre entre temporadas (añadido 2026-09-21):** la media pre-partido
+de cada equipo ya NO es solo de su temporada mas reciente -- si el
+equipo jugo una temporada anterior real (>= 10 partidos) en la misma
+`source`, se encoge hacia esa media anterior con 10 partidos "virtuales"
+de peso (formula beta-binomial, mismo patron que el prior de jugador del
+modelo de tiro, ver `SEASON_PRIOR_K_SHRINK`/`_add_season_carryover()` en
+`src/features_pregame.py`). Antes de esto, un equipo con pocos partidos
+en su temporada actual daba una prediccion basada en una media de 1-2
+partidos (ruido); ahora se apoya en la temporada anterior completa
+mientras la actual todavia es corta, y el peso se desplaza solo hacia la
+temporada actual a medida que se juegan mas partidos. La respuesta
+incluye `home_used_season_carryover`/`away_used_season_carryover` para
+saber si un equipo concreto se beneficio de esto. Verificado en datos
+reales antes de implementarlo: la correlacion entre el rendimiento de
+una temporada y la siguiente del mismo equipo es alta en las 8 columnas
+(0.52-0.94 segun la metrica, 461 pares reales de temporadas
+consecutivas) -- no es una suposicion.
+
 ## Validado
 
 - **Mecanica** (`scripts/test_api.py`, parte 1): base de datos SQLite
@@ -265,15 +283,22 @@ ambos equipos por defecto (`diff_rest_days = 0`) -- se puede afinar con
   triple de NBA, uno con `shot_type="desconocido"` de FEB, y uno con
   `player_id` real de NBA) mas peticiones mal formadas para comprobar
   los 400. Ejecutado de verdad en esta sesion (2026-09-21, tras añadir
-  el prior de jugador -- ver mas abajo): `home_win_probability=0.4654`
-  para Atlanta Hawks (local) - Boston Celtics (visitante); para tiro
-  (modelo con 11 fuentes + prior de jugador, accuracy=0.633/
-  AUC=0.658, sube desde 0.632/0.654 sin el prior), `make_probability=
-  0.9764` junto al aro de NBA (jugador generico, `player_prior_fg=
-  0.6563`, el FG% de liga de esa zona) vs `0.9782` para el mismo tiro
-  con `player_id="1628969"` (Mikal Bridges, `player_prior_fg=0.7218`,
-  su propio acierto real de aro es mayor que la media de liga -- el
-  modelo SI reacciona al prior de jugador, no es un campo decorativo).
+  el arrastre entre temporadas y el prior de jugador -- ver mas abajo):
+  `home_win_probability=0.4663` para Atlanta Hawks (local) - Boston
+  Celtics (visitante), ambos equipos con `used_season_carryover=True`
+  (temporada 2025-26 completa, 82 partidos cada uno -- el arrastre pesa
+  poco a estas alturas de temporada, pero sigue aplicandose); modelo de
+  resultado de partido con el arrastre, accuracy=0.683/AUC=0.735 (sube
+  desde 0.682/0.731 sin el, y con 839 partidos mas utilizables -- los
+  que antes se descartaban por tener pocos partidos AUN con temporada
+  anterior real detras). Para tiro (modelo con 11 fuentes + prior de
+  jugador, accuracy=0.633/AUC=0.658, sube desde 0.632/0.654 sin el
+  prior), `make_probability=0.9764` junto al aro de NBA (jugador
+  generico, `player_prior_fg=0.6563`, el FG% de liga de esa zona) vs
+  `0.9782` para el mismo tiro con `player_id="1628969"` (Mikal Bridges,
+  `player_prior_fg=0.7218`, su propio acierto real de aro es mayor que
+  la media de liga -- el modelo SI reacciona al prior de jugador, no es
+  un campo decorativo).
   El triple de referencia sale `0.0016` (muy de frente y justo pasada
   la linea) -- sigue pareciendo bajo frente a un ~30-35% esperado;
   seguramente refleja mas el AUC modesto del modelo en esa zona/angulo

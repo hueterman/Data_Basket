@@ -39,7 +39,9 @@ import pandas as pd
 from src.features import (
     SHOT_COORD_CALIBRATION, SHOT_PRIOR_K_SHRINK, _classify_zone, build_team_game_features,
 )
-from src.features_pregame import ROLLING_STAT_COLS
+from src.features_pregame import (
+    MIN_PRIOR_SEASON_GAMES, ROLLING_STAT_COLS, SEASON_PRIOR_K_SHRINK, _add_season_carryover,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 MODELS_DIR = PROJECT_ROOT / "models"
@@ -163,8 +165,22 @@ def load_shot_metadata() -> dict:
 def latest_team_features(conn: sqlite3.Connection, source: str, team_id: str) -> dict:
     """Medias pre-partido ACTUALES de un equipo (ver docstring del
     modulo): media de pace_40/ortg/drtg/efg_pct/tov_pct/orb_pct/ft_rate/
-    win sobre TODOS sus partidos jugados en su temporada mas reciente
-    (dentro de `source`).
+    win en su temporada mas reciente (dentro de `source`), CON EL MISMO
+    ARRASTRE de temporada anterior que usa el entrenamiento (AÑADIDO
+    2026-09-21, ver _add_season_carryover() en src/features_pregame.py
+    para la verificacion empirica completa -- señal real de que el
+    rendimiento de la temporada pasada predice el arranque de la
+    siguiente, en las 8 columnas). Sin esto, un equipo con pocos
+    partidos en su temporada mas reciente daria una prediccion en vivo
+    basada en una media de 1-2 partidos (puro ruido) mientras que el
+    MODELO se entreno ya con el arrastre -- inconsistencia real entre
+    entrenamiento e inferencia que se evita aplicando la misma formula
+    aqui, no una aproximacion distinta.
+
+    La temporada "mas reciente" se determina por FECHA real (la que
+    empezo mas tarde), no por orden alfabetico del string `season` --
+    mismo motivo que en _add_season_carryover() (ACB tiene valores de
+    `season` con un espacio inicial inconsistente).
 
     Lanza PredictionError si el equipo no tiene ningun partido jugado
     todavia en una fuente entrenable (build_team_game_features() usa
@@ -177,19 +193,42 @@ def latest_team_features(conn: sqlite3.Connection, source: str, team_id: str) ->
             f"Sin partidos jugados en source={source!r} (fuente desconocida, "
             f"no entrenable, o sin datos ingeridos todavia)."
         )
-    team_games = team_games[team_games["team_id"] == team_id]
-    if team_games.empty:
+    team_games = team_games.copy()
+    team_games["date_parsed"] = pd.to_datetime(
+        team_games["date"], utc=True, format="mixed", errors="coerce"
+    )
+    team_games = _add_season_carryover(team_games, ROLLING_STAT_COLS)
+
+    this_team = team_games[team_games["team_id"] == team_id]
+    if this_team.empty:
         raise PredictionError(
             f"team_id={team_id!r} no tiene ningun partido jugado en "
             f"source={source!r} -- revisa el identificador (GET /teams?"
             f"source={source} lista los equipos validos)."
         )
 
-    latest_season = team_games["season"].max()
-    season_games = team_games[team_games["season"] == latest_season]
+    season_start = this_team.groupby("season")["date_parsed"].min()
+    latest_season = season_start.idxmax()
+    season_games = this_team[this_team["season"] == latest_season]
+    n_games = int(len(season_games))
 
-    means = {col: float(season_games[col].mean()) for col in ROLLING_STAT_COLS}
-    return {"season": latest_season, "n_games": int(len(season_games)), **means}
+    means: dict[str, float] = {}
+    used_carryover = False
+    for col in ROLLING_STAT_COLS:
+        cur_mean = float(season_games[col].mean())
+        prior_val = season_games[f"prior_season_{col}"].iloc[0]
+        if pd.notna(prior_val):
+            means[col] = (n_games * cur_mean + SEASON_PRIOR_K_SHRINK * float(prior_val)) / (
+                n_games + SEASON_PRIOR_K_SHRINK
+            )
+            used_carryover = True
+        else:
+            means[col] = cur_mean
+
+    return {
+        "season": latest_season, "n_games": n_games,
+        "used_season_carryover": used_carryover, **means,
+    }
 
 
 def predict_game(
@@ -228,17 +267,25 @@ def predict_game(
     except PredictionError:
         min_prior_games = DEFAULT_MIN_PRIOR_GAMES
 
+    # Solo avisa de "poco historial" si de verdad no hay nada solido
+    # detras de la media -- un equipo con pocos partidos esta temporada
+    # pero con arrastre de la temporada anterior (used_season_carryover,
+    # ver latest_team_features()) YA NO es una media de 1-2 partidos, es
+    # un encogido hacia una temporada entera real, mismo criterio que se
+    # aplico al entrenar (ver _add_season_carryover()).
     warnings = []
-    if home["n_games"] < min_prior_games:
+    if home["n_games"] < min_prior_games and not home["used_season_carryover"]:
         warnings.append(
             f"Local con solo {home['n_games']} partido(s) jugado(s) esta "
-            f"temporada (< {min_prior_games}) -- media poco fiable, misma "
-            f"exigencia que min_prior_games en train.py."
+            f"temporada (< {min_prior_games}) y sin temporada anterior de la "
+            f"que arrastrar -- media poco fiable, misma exigencia que "
+            f"min_prior_games en train.py."
         )
-    if away["n_games"] < min_prior_games:
+    if away["n_games"] < min_prior_games and not away["used_season_carryover"]:
         warnings.append(
-            f"Visitante con solo {away['n_games']} partido(s) jugado(s) "
-            f"esta temporada (< {min_prior_games}) -- media poco fiable."
+            f"Visitante con solo {away['n_games']} partido(s) jugado(s) esta "
+            f"temporada (< {min_prior_games}) y sin temporada anterior de la "
+            f"que arrastrar -- media poco fiable."
         )
 
     return {
@@ -252,6 +299,8 @@ def predict_game(
         "away_season": away["season"],
         "home_games_played": home["n_games"],
         "away_games_played": away["n_games"],
+        "home_used_season_carryover": home["used_season_carryover"],
+        "away_used_season_carryover": away["used_season_carryover"],
         "warnings": warnings,
     }
 

@@ -303,6 +303,14 @@
             "items": {
               "type": "string"
             }
+          },
+          "home_used_season_carryover": {
+            "type": "boolean",
+            "description": "True si home_* se calculo con arrastre de la temporada anterior (ver add_shot_priors-like _add_season_carryover en src/features_pregame.py)"
+          },
+          "away_used_season_carryover": {
+            "type": "boolean",
+            "description": "Igual que home_used_season_carryover, para el visitante."
           }
         }
       },

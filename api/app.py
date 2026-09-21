@@ -69,9 +69,14 @@ Endpoints:
         "away_team_id": "...", "model": "xgboost" (opcional, default
         "xgboost"), "home_rest_days"/"away_rest_days" (opcionales,
         default 0 -- ver docstring de src/predict.py sobre por que).
-        Devuelve home_win_probability/away_win_probability y avisos
-        ("warnings") si algun equipo tiene poco historial esta
-        temporada todavia.
+        Devuelve home_win_probability/away_win_probability,
+        home_used_season_carryover/away_used_season_carryover
+        (AÑADIDO 2026-09-21 -- si la media pre-partido de ese equipo se
+        encogio hacia su temporada anterior real, ver
+        _add_season_carryover() en src/features_pregame.py) y avisos
+        ("warnings") solo cuando un equipo tiene poco historial esta
+        temporada Y NINGUN arrastre de la temporada anterior que lo
+        respalde.
 
     GET  /model/info/shot
         Igual que /model/info pero para el modelo de PROBABILIDAD DE
