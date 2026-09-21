@@ -24,13 +24,13 @@
     },
     "logreg": {
       "accuracy": 0.6907840440165062,
-      "log_loss": 0.5834482450424303,
-      "roc_auc": 0.748092679974903
+      "log_loss": 0.5833968479071301,
+      "roc_auc": 0.7481477493933082
     },
     "xgboost": {
       "accuracy": 0.6894085281980743,
-      "log_loss": 0.5868506795860062,
-      "roc_auc": 0.7434816990091216
+      "log_loss": 0.5870602985923538,
+      "roc_auc": 0.7430606345234516
     }
   },
   "logreg_metrics_by_source": {
@@ -62,7 +62,7 @@
     "lfchallenge": {
       "n": 200,
       "home_win_rate": 0.53,
-      "accuracy": 0.775
+      "accuracy": 0.77
     },
     "lfendesa": {
       "n": 200,
@@ -77,7 +77,7 @@
     "segundafeb": {
       "n": 147,
       "home_win_rate": 0.6054421768707483,
-      "accuracy": 0.6938775510204082
+      "accuracy": 0.7006802721088435
     }
   }
 }

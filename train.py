@@ -171,6 +171,22 @@ def main() -> None:
     prob_xgb = xgb.predict_proba(X_test)[:, 1]
     metrics_xgb = evaluate("XGBoost", y_test, prob_xgb)
 
+    # NOTA (2026-09-22): se evaluo aqui un ensemble 50/50 logreg+XGBoost
+    # (media simple de las dos prob_* de arriba sobre el mismo test set)
+    # y NO mostro mejora real sobre la regresion logistica sola:
+    #   Regresion logistica    accuracy=0.691  log_loss=0.583  roc_auc=0.748
+    #   XGBoost                accuracy=0.689  log_loss=0.587  roc_auc=0.743
+    #   Ensemble (logreg+xgb)  accuracy=0.692  log_loss=0.584  roc_auc=0.747
+    # El ensemble empata/pierde contra logreg solo en log_loss y roc_auc
+    # (las dos metricas que mas importan para probabilidades bien
+    # calibradas) y solo gana +0.1pp de accuracy, dentro del ruido para
+    # 3635 partidos de test. No aporta señal nueva: logreg y XGBoost
+    # comparten los mismos errores en la mayoria de partidos (ambos usan
+    # las mismas features), asi que promediarlos no reduce varianza de
+    # forma apreciable. Descartado -- no se sirve por la API. Revertido
+    # a la version sin ensemble; si en el futuro se quiere retomar, el
+    # codigo esta en el historial de git de ese dia.
+
     print("\nRegresion logistica -- desglose por liga (el numero agregado no representa a ninguna en concreto):")
     evaluate_by_source(test_df, prob_logreg)
 
