@@ -162,6 +162,21 @@ def game_outcome_env(tmp_path):
     joblib.dump(model, predict_mod._MODEL_FILES["logreg"])
     joblib.dump(model, predict_mod._MODEL_FILES["xgboost"])
 
+    # Redirige tambien _MARGIN_MODEL_FILES a tmp_path (AÑADIDO
+    # 2026-09-22, train_margin.py) SIN crear ningun .joblib ahi --
+    # a proposito, mismo criterio de aislamiento que el resto de este
+    # fixture ("sin depender de los .joblib reales del proyecto", ver
+    # docstring de test_shap_explanations.py): predict_game() debe
+    # devolver predicted_margin=None (modelo "todavia no entrenado")
+    # en estos tests de mecanica, nunca tocar los modelos de margen
+    # reales de models/. La integracion contra los modelos de margen
+    # reales vive en tests/test_predict_margin.py.
+    predict_mod._MARGIN_MODEL_FILES = {
+        "ridge": tmp_path / "game_margin_ridge.joblib",
+        "xgboost": tmp_path / "game_margin_xgb.joblib",
+    }
+    predict_mod._margin_model_cache.clear()
+
     conn = get_connection(db_path)
     yield conn, predict_mod
     conn.close()
@@ -183,6 +198,19 @@ def test_low_history_team_triggers_warning(game_outcome_env):
         "salir un aviso de poco historial"
     )
     assert result["away_used_season_carryover"] is False
+
+
+def test_predicted_margin_is_none_when_margin_model_not_trained(game_outcome_env):
+    """El fixture redirige _MARGIN_MODEL_FILES a un tmp_path sin ningun
+    .joblib dentro (AÑADIDO 2026-09-22, ver game_outcome_env) -- un
+    margin_model_name VALIDO pero sin modelo entrenado no debe romper
+    /predict, solo dejar predicted_margin/margin_model/
+    margin_shap_explanation a None (ver docstring de predict_game())."""
+    conn, predict_mod = game_outcome_env
+    result = predict_mod.predict_game(conn, SOURCE, "T1", "T2", model_name="logreg")
+    assert result["predicted_margin"] is None
+    assert result["margin_model"] is None
+    assert result["margin_shap_explanation"] is None
 
 
 def test_season_carryover_suppresses_low_history_warning(game_outcome_env):
@@ -216,6 +244,8 @@ def test_season_carryover_suppresses_low_history_warning(game_outcome_env):
      lambda predict_mod, conn: predict_mod.latest_team_features(conn, "nba", "T1")),
     ("modelo desconocido",
      lambda predict_mod, conn: predict_mod.predict_game(conn, SOURCE, "T1", "T2", model_name="no_existe")),
+    ("modelo de margen desconocido",
+     lambda predict_mod, conn: predict_mod.predict_game(conn, SOURCE, "T1", "T2", margin_model_name="no_existe")),
 ])
 def test_error_cases_raise_prediction_error(game_outcome_env, label, call):
     conn, predict_mod = game_outcome_env

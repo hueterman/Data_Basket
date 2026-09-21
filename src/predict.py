@@ -95,6 +95,22 @@ _SHOT_MODEL_FILES: dict[str, Path] = {
 }
 _shot_model_cache: dict[str, object] = {}
 
+# Tercer modelo (train_margin.py): margen de victoria esperado
+# (home_score - away_score) del partido HIPOTETICO -- MISMAS
+# FEATURE_COLS que el modelo de resultado de partido (diff_*_pre +
+# diff_rest_days + diff_elo_pre, ver docstring del modulo y de
+# train_margin.py), asi que predict_game() reutiliza el DataFrame X ya
+# construido para el modelo de resultado, sin computar ninguna feature
+# nueva. "ridge" es un Pipeline (StandardScaler + Ridge, ver
+# train_margin.py); "xgboost" es un XGBRegressor bareo -- mismo patron
+# Pipeline/estimador-bareo que _MODEL_FILES de mas arriba, ya soportado
+# por _shap_contributions().
+_MARGIN_MODEL_FILES: dict[str, Path] = {
+    "ridge": MODELS_DIR / "game_margin_ridge.joblib",
+    "xgboost": MODELS_DIR / "game_margin_xgb.joblib",
+}
+_margin_model_cache: dict[str, object] = {}
+
 DEFAULT_MIN_PRIOR_GAMES = 5  # igual que --min-prior-games por defecto en train.py
 
 
@@ -188,25 +204,30 @@ def _shap_contributions(
     categorical_cols: frozenset[str] = frozenset(),
 ) -> dict:
     """Explica UNA prediccion concreta con SHAP (AÑADIDO 2026-09-21, ver
-    /predict y /predict_shot en api/app.py) -- que feature (en el
-    espacio de entrada ORIGINAL, no transformado) empujo mas la
-    probabilidad predicha hacia arriba o hacia abajo.
+    /predict y /predict_shot en api/app.py; AMPLIADO 2026-09-22 a los
+    modelos de margen de train_margin.py, ver mas abajo) -- que feature
+    (en el espacio de entrada ORIGINAL, no transformado) empujo mas la
+    prediccion hacia arriba o hacia abajo.
 
-    Funciona igual para los 4 modelos reales de este proyecto (logreg/
-    xgboost, resultado de partido/tiro) SIN ramas por tipo de algoritmo:
-    en vez de shap.TreeExplainer (rapido pero, a fecha de esta sesion,
-    roto con XGBoost 3.x -- su XGBTreeModelLoader no sabe parsear el
-    base_score que XGBoost 3.x serializa como '[5.8281195E-1]' en vez de
-    un escalar plano, ValueError real comprobado contra los .joblib de
-    este proyecto) se usa shap.Explainer() generico sobre
-    `clf.predict_proba`, que trata el clasificador como caja negra --
-    funciona para cualquier clasificador sklearn-compatible (elige
+    Funciona igual para los 6 modelos reales de este proyecto (logreg/
+    xgboost de resultado de partido y de tiro, ridge/xgboost de margen)
+    SIN ramas por tipo de algoritmo salvo una: en vez de
+    shap.TreeExplainer (rapido pero, a fecha de esta sesion, roto con
+    XGBoost 3.x -- su XGBTreeModelLoader no sabe parsear el base_score
+    que XGBoost 3.x serializa como '[5.8281195E-1]' en vez de un escalar
+    plano, ValueError real comprobado contra los .joblib de este
+    proyecto) se usa shap.Explainer() generico sobre `clf.predict_proba`
+    (clasificadores) o `clf.predict` (regresores, sin predict_proba --
+    ver mas abajo), que trata el modelo como caja negra -- funciona
+    para cualquier clasificador/regresor sklearn-compatible (elige
     ExactExplainer si hay pocas features para enumerar 2^n exactamente,
-    PermutationExplainer si no) y da la contribucion YA en escala de
-    PROBABILIDAD (no log-odds), mas facil de leer para quien no sepa que
-    es un log-odds. Verificado contra los 4 modelos reales: base_value +
-    suma(shap_value) == predict_proba() exacto (aditividad de Shapley),
-    diff < 1e-9 en los cuatro casos.
+    PermutationExplainer si no). Para un clasificador da la contribucion
+    YA en escala de PROBABILIDAD (no log-odds), mas facil de leer para
+    quien no sepa que es un log-odds; para un regresor, en la escala
+    nativa del target (puntos de margen). Verificado contra los 6
+    modelos reales: base_value + suma(shap_value) == prediccion exacta
+    (predict_proba() o predict() segun el caso, aditividad de Shapley),
+    diff < 1e-9 en los seis casos.
 
     Si `model` es un Pipeline (preprocesado + "clf" como ULTIMO paso,
     mismo patron en train.py/train_shot.py), se explica sobre el
@@ -246,7 +267,18 @@ def _shap_contributions(
         transformed_names = list(feature_cols)
 
     background = np.zeros((1, X_transformed.shape[1]))
-    explainer = shap.Explainer(lambda arr: clf.predict_proba(arr)[:, 1], background)
+    # Clasificadores (logreg/xgboost de resultado de partido y de tiro):
+    # se explica predict_proba (escala de probabilidad). Regresores
+    # (AÑADIDO 2026-09-22 para train_margin.py: Ridge/XGBRegressor no
+    # tienen predict_proba, solo predict()) -- se explica predict()
+    # directamente, ya en la escala nativa del target (puntos de
+    # margen), no hace falta ninguna transformacion adicional para que
+    # la aditividad de Shapley siga cumpliendose.
+    if hasattr(clf, "predict_proba"):
+        predict_fn = lambda arr: clf.predict_proba(arr)[:, 1]
+    else:
+        predict_fn = clf.predict
+    explainer = shap.Explainer(predict_fn, background)
     explanation = explainer(X_transformed)
 
     row_values = np.asarray(explanation.values)[0]
@@ -305,6 +337,27 @@ def load_shot_metadata() -> dict:
     nunca vio en vez de dejar que OneHotEncoder(handle_unknown="ignore")
     la ignore en silencio."""
     return _load_metadata_file("shot_make_metadata.json", "python train_shot.py")
+
+
+def available_margin_models() -> list[str]:
+    """Nombres de modelo de MARGEN DE VICTORIA cuyo .joblib existe ya
+    (puede estar vacio si no se ha ejecutado train_margin.py
+    todavia)."""
+    return [name for name, path in _MARGIN_MODEL_FILES.items() if path.exists()]
+
+
+def load_margin_model(name: str):
+    """Carga (y cachea) un modelo de MARGEN DE VICTORIA por nombre --
+    ver load_model() para el criterio de cache."""
+    return _load_cached(_margin_model_cache, name, _MARGIN_MODEL_FILES, "python train_margin.py")
+
+
+def load_margin_metadata() -> dict:
+    """Contenido de models/game_margin_metadata.json (metricas reales
+    del ultimo entrenamiento de train_margin.py: baseline/ridge/xgboost,
+    mae/rmse/r2/sign_accuracy) -- ver GET /model/info/margin en
+    api/app.py."""
+    return _load_metadata_file("game_margin_metadata.json", "python train_margin.py")
 
 
 def latest_team_features(conn: sqlite3.Connection, source: str, team_id: str) -> dict:
@@ -417,6 +470,7 @@ def predict_game(
     home_team_id: str,
     away_team_id: str,
     model_name: str = "xgboost",
+    margin_model_name: str = "xgboost",
     home_rest_days: float = 0.0,
     away_rest_days: float = 0.0,
 ) -> dict:
@@ -424,6 +478,12 @@ def predict_game(
     (home_team_id/away_team_id no tienen por que haberse enfrentado
     nunca) segun el modelo `model_name` de train.py, usando las medias
     pre-partido ACTUALES de cada equipo (ver latest_team_features()).
+    Ademas (AÑADIDO 2026-09-22) el margen de victoria esperado segun el
+    modelo `margin_model_name` de train_margin.py, sobre el MISMO X
+    (ver mas abajo) -- si ese modelo todavia no se ha entrenado, la
+    respuesta sigue incluyendo la prediccion de resultado normal con
+    predicted_margin=None, no aborta la peticion entera por un modelo
+    secundario.
 
     Lanza PredictionError (-> 400/404 en api/app.py) si algo de la
     entrada no es valido, en vez de dejar que reviente una excepcion
@@ -447,6 +507,33 @@ def predict_game(
     model = load_model(model_name)
     home_win_prob = float(model.predict_proba(X)[0, 1])
     shap_explanation = _shap_contributions(model, X, FEATURE_COLS)
+
+    # Margen de victoria esperado (AÑADIDO 2026-09-22, train_margin.py):
+    # MISMO X que el modelo de resultado -- FEATURE_COLS identico entre
+    # los dos (ver docstring del modulo) -- asi que no hace falta
+    # recalcular ninguna feature, solo pasar X por el modelo de margen.
+    #
+    # Opcional SOLO en el sentido de "modelo todavia no entrenado": si
+    # train_margin.py no se ha ejecutado todavia (nombre VALIDO pero sin
+    # .joblib en disco), /predict sigue devolviendo la prediccion de
+    # resultado con predicted_margin=None en vez de fallar entera por un
+    # modelo secundario que no es estrictamente necesario para responder
+    # "quien gana". Un margin_model_name INVALIDO (typo, nombre que no
+    # existe en _MARGIN_MODEL_FILES) NO se traga en silencio -- debe
+    # propagar el PredictionError igual que un model_name invalido del
+    # modelo de resultado (ver _load_cached()), para no confundir "no
+    # esta entrenado todavia" con "has escrito mal el nombre".
+    if margin_model_name not in _MARGIN_MODEL_FILES:
+        raise PredictionError(
+            f"Modelo de margen desconocido: {margin_model_name!r}. "
+            f"Validos: {sorted(_MARGIN_MODEL_FILES)}"
+        )
+    predicted_margin = None
+    margin_shap_explanation = None
+    if margin_model_name in available_margin_models():
+        margin_model = load_margin_model(margin_model_name)
+        predicted_margin = float(margin_model.predict(X)[0])
+        margin_shap_explanation = _shap_contributions(margin_model, X, FEATURE_COLS)
 
     try:
         min_prior_games = int(load_metadata().get("min_prior_games", DEFAULT_MIN_PRIOR_GAMES))
@@ -503,6 +590,14 @@ def predict_game(
         # ya en escala de probabilidad, base_value + suma(shap_value de
         # todas las features) == home_win_probability sin redondear.
         "shap_explanation": shap_explanation,
+        # Margen de victoria esperado (AÑADIDO 2026-09-22, train_margin.py):
+        # puntos, positivo = gana el local por esa diferencia, negativo =
+        # gana el visitante. None si train_margin.py no se ha ejecutado
+        # todavia (ver docstring de la funcion) -- en ese caso
+        # margin_model/margin_shap_explanation tambien quedan a None.
+        "predicted_margin": None if predicted_margin is None else round(predicted_margin, 1),
+        "margin_model": margin_model_name if predicted_margin is not None else None,
+        "margin_shap_explanation": margin_shap_explanation,
     }
 
 

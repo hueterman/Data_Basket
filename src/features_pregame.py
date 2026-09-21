@@ -439,6 +439,9 @@ def build_pregame_game_dataset(
     _add_season_carryover()), su diferencia local-visitante (`diff_*_pre`,
     la forma que suele darle mas señal a un modelo lineal que los dos
     valores sueltos), descanso de cada equipo, y el target `home_win`.
+    Tambien incluye `margin` (home_score - away_score, AÑADIDO 2026-09-22,
+    ver train_margin.py) -- positivo si gana el local, calculado por
+    separado de `home_win` (no se deriva uno del otro).
 
     Descarta un partido si el local o el visitante NO tienen suficiente
     informacion pre-partido de ninguna de las dos formas: ni
@@ -462,8 +465,12 @@ def build_pregame_game_dataset(
     # build_team_game_features() ya "aplana" cada partido a team_id/
     # opp_id, perdiendo cual de los dos era el local -- se recupera
     # directamente de games (unica fuente de verdad para home/away).
-    games_df = pd.read_sql("SELECT source, game_id, home_team_id FROM games", conn)
-    pre = pre.merge(games_df, on=["source", "game_id"], how="left")
+    games_df = pd.read_sql(
+        "SELECT source, game_id, home_team_id, home_score, away_score FROM games", conn
+    )
+    pre = pre.merge(
+        games_df.drop(columns=["home_score", "away_score"]), on=["source", "game_id"], how="left"
+    )
     pre["is_home"] = pre["team_id"] == pre["home_team_id"]
     pre = add_elo_ratings(pre)
 
@@ -481,6 +488,14 @@ def build_pregame_game_dataset(
     away = away.drop(columns=["win"]).rename(columns=away_rename)
 
     games = home.merge(away, on=["source", "game_id"], how="inner")
+    games = games.merge(
+        games_df[["source", "game_id", "home_score", "away_score"]],
+        on=["source", "game_id"], how="left",
+    )
+    # AÑADIDO 2026-09-22, ver train_margin.py: margin > 0 = gana el
+    # local, coherente con home_win pero calculado por separado (no se
+    # deriva uno del otro).
+    games["margin"] = games["home_score"] - games["away_score"]
 
     for c in ROLLING_STAT_COLS:
         games[f"diff_{c}_pre"] = games[f"home_{c}_pre"] - games[f"away_{c}_pre"]

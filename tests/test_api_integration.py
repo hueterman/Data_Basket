@@ -62,7 +62,10 @@ def test_health_and_docs_endpoints(api_client):
     r = api_client.get("/openapi.json")
     spec = r.get_json()
     assert r.status_code == 200
-    expected_paths = {"/health", "/model/info", "/model/info/shot", "/teams", "/predict", "/predict_shot"}
+    expected_paths = {
+        "/health", "/model/info", "/model/info/shot", "/model/info/margin",
+        "/teams", "/predict", "/predict_shot",
+    }
     assert expected_paths <= set(spec.get("paths", {})), (
         f"faltan paths en openapi.json: {expected_paths - set(spec.get('paths', {}))}"
     )
@@ -72,6 +75,18 @@ def test_health_and_docs_endpoints(api_client):
 
     r = api_client.get("/model/info")
     assert r.status_code == 200
+
+
+def test_model_info_margin(api_client, real_predict_mod):
+    if not real_predict_mod.available_margin_models():
+        pytest.skip(
+            "sin modelo de margen real en models/ todavia -- ejecuta 'python "
+            "train_margin.py' para probar /model/info/margin"
+        )
+    r = api_client.get("/model/info/margin")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert set(real_predict_mod.available_margin_models()) <= set(body["available_models"])
 
 
 def test_predict_with_real_teams(api_client):
@@ -116,6 +131,34 @@ def test_predict_with_real_teams(api_client):
         assert {c["feature"] for c in exp["contributions"]} == set(predict_mod.FEATURE_COLS)
         total = exp["base_value"] + sum(c["shap_value"] for c in exp["contributions"])
         assert total == pytest.approx(pred["home_win_probability"], abs=1e-3)
+
+    # Margen de victoria (AÑADIDO 2026-09-22, train_margin.py) -- contra
+    # los modelos REALES (ridge Pipeline y xgboost bareo) SI ya existen
+    # (mismo criterio "todo o skip" que el resto de este modulo: no
+    # existen en un checkout limpio de CI, ver docstring del modulo).
+    if predict_mod.available_margin_models():
+        for margin_model_name in predict_mod.available_margin_models():
+            r = api_client.post("/predict", json={
+                "source": real_source, "home_team_id": home_id, "away_team_id": away_id,
+                "margin_model": margin_model_name,
+            })
+            pred = r.get_json()
+            assert r.status_code == 200
+            assert isinstance(pred["predicted_margin"], (int, float))
+            assert pred["margin_model"] == margin_model_name
+            mexp = pred["margin_shap_explanation"]
+            assert {c["feature"] for c in mexp["contributions"]} == set(predict_mod.FEATURE_COLS)
+            mtotal = mexp["base_value"] + sum(c["shap_value"] for c in mexp["contributions"])
+            assert mtotal == pytest.approx(pred["predicted_margin"], abs=1e-1)
+
+        # margin_model invalido -- 400, no un 500 ni un None silencioso
+        # (ver docstring de predict_game() sobre por que se distingue de
+        # "todavia no entrenado").
+        r = api_client.post("/predict", json={
+            "source": real_source, "home_team_id": home_id, "away_team_id": away_id,
+            "margin_model": "no_existe",
+        })
+        assert r.status_code == 400
 
     # Peticion mal formada -- debe devolver 400, no un 500.
     r = api_client.post("/predict", json={"source": real_source, "home_team_id": home_id})

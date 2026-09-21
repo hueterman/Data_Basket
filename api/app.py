@@ -67,16 +67,28 @@ Endpoints:
     POST /predict
         Body JSON: {"source": "acb", "home_team_id": "...",
         "away_team_id": "...", "model": "xgboost" (opcional, default
-        "xgboost"), "home_rest_days"/"away_rest_days" (opcionales,
+        "xgboost"), "margin_model": "xgboost" (opcional, default
+        "xgboost", AÑADIDO 2026-09-22 -- "ridge" o "xgboost", ver
+        train_margin.py), "home_rest_days"/"away_rest_days" (opcionales,
         default 0 -- ver docstring de src/predict.py sobre por que).
         Devuelve home_win_probability/away_win_probability,
         home_used_season_carryover/away_used_season_carryover
         (AÑADIDO 2026-09-21 -- si la media pre-partido de ese equipo se
         encogio hacia su temporada anterior real, ver
-        _add_season_carryover() en src/features_pregame.py) y avisos
+        _add_season_carryover() en src/features_pregame.py), avisos
         ("warnings") solo cuando un equipo tiene poco historial esta
         temporada Y NINGUN arrastre de la temporada anterior que lo
-        respalde.
+        respalde, y predicted_margin/margin_model/margin_shap_explanation
+        (AÑADIDO 2026-09-22, train_margin.py -- margen de victoria
+        esperado en puntos, positivo = gana el local; None si
+        train_margin.py no se ha ejecutado todavia, ver GET
+        /model/info/margin).
+
+    GET  /model/info/margin
+        Igual que /model/info pero para el modelo de MARGEN DE VICTORIA
+        (train_margin.py, AÑADIDO 2026-09-22) -- metricas (mae/rmse/r2/
+        sign_accuracy de baseline/ridge/xgboost), feature_cols (misma
+        lista que /model/info, distinto target).
 
     GET  /model/info/shot
         Igual que /model/info pero para el modelo de PROBABILIDAD DE
@@ -123,8 +135,10 @@ from flask_swagger_ui import get_swaggerui_blueprint
 from src.pipeline.db import get_connection
 from src.predict import (
     PredictionError,
+    available_margin_models,
     available_models,
     available_shot_models,
+    load_margin_metadata,
     load_metadata,
     load_shot_metadata,
     predict_game,
@@ -221,6 +235,20 @@ def model_info_shot():
     return jsonify(metadata)
 
 
+@app.route("/model/info/margin")
+def model_info_margin():
+    """Metadata del modelo de MARGEN DE VICTORIA (train_margin.py, AÑADIDO
+    2026-09-22) -- ruta separada por el mismo motivo que /model/info/shot:
+    metricas propias (mae/rmse/r2/sign_accuracy) que no tienen sentido
+    mezcladas con las de /model/info."""
+    try:
+        metadata = load_margin_metadata()
+    except PredictionError as exc:
+        return jsonify({"error": str(exc)}), 404
+    metadata["available_models"] = available_margin_models()
+    return jsonify(metadata)
+
+
 @app.route("/teams")
 def teams():
     source = request.args.get("source") or ""
@@ -261,6 +289,7 @@ def predict():
             home_team_id=data["home_team_id"],
             away_team_id=data["away_team_id"],
             model_name=data.get("model", "xgboost"),
+            margin_model_name=data.get("margin_model", "xgboost"),
             home_rest_days=home_rest_days,
             away_rest_days=away_rest_days,
         )

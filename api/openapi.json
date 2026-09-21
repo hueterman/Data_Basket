@@ -89,6 +89,33 @@
         }
       }
     },
+    "/model/info/margin": {
+      "get": {
+        "summary": "Metadata del ultimo entrenamiento del modelo de MARGEN DE VICTORIA (train_margin.py)",
+        "responses": {
+          "200": {
+            "description": "Metadata real del ultimo train_margin.py",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameMarginMetadata"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No se ha ejecutado train_margin.py todavia",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/teams": {
       "get": {
         "summary": "Equipos de una fuente concreta",
@@ -262,6 +289,15 @@
           "away_rest_days": {
             "type": "number",
             "default": 0.0
+          },
+          "margin_model": {
+            "type": "string",
+            "enum": [
+              "ridge",
+              "xgboost"
+            ],
+            "default": "xgboost",
+            "description": "Modelo de MARGEN DE VICTORIA a usar (train_margin.py, AÑADIDO 2026-09-22). Un nombre invalido devuelve 400; un nombre valido pero sin entrenar todavia deja predicted_margin a null en la respuesta."
           }
         }
       },
@@ -322,6 +358,25 @@
           "away_elo": {
             "type": "number",
             "description": "Igual que home_elo, para el visitante."
+          },
+          "predicted_margin": {
+            "type": "number",
+            "nullable": true,
+            "description": "Margen de victoria esperado en puntos (positivo = gana el local por esa diferencia, negativo = gana el visitante). AÑADIDO 2026-09-22, train_margin.py. null si ese modelo todavia no se ha entrenado."
+          },
+          "margin_model": {
+            "type": "string",
+            "nullable": true,
+            "description": "Nombre del modelo de margen usado ('ridge' o 'xgboost'). null si predicted_margin es null."
+          },
+          "margin_shap_explanation": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ShapExplanation"
+              }
+            ],
+            "nullable": true,
+            "description": "Igual que shap_explanation pero para predicted_margin (base_value + suma(shap_value) == predicted_margin sin redondear). null si predicted_margin es null."
           }
         }
       },
@@ -661,6 +716,111 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ShapContribution"
+            }
+          }
+        }
+      },
+      "GameMarginMetadata": {
+        "type": "object",
+        "properties": {
+          "target": {
+            "type": "string"
+          },
+          "feature_cols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "min_prior_games": {
+            "type": "integer"
+          },
+          "test_frac": {
+            "type": "number"
+          },
+          "n_train": {
+            "type": "integer"
+          },
+          "n_test": {
+            "type": "integer"
+          },
+          "metrics": {
+            "type": "object",
+            "properties": {
+              "baseline": {
+                "type": "object",
+                "properties": {
+                  "mae": {
+                    "type": "number"
+                  },
+                  "rmse": {
+                    "type": "number"
+                  },
+                  "r2": {
+                    "type": "number"
+                  },
+                  "sign_accuracy": {
+                    "type": "number"
+                  }
+                }
+              },
+              "ridge": {
+                "type": "object",
+                "properties": {
+                  "mae": {
+                    "type": "number"
+                  },
+                  "rmse": {
+                    "type": "number"
+                  },
+                  "r2": {
+                    "type": "number"
+                  },
+                  "sign_accuracy": {
+                    "type": "number"
+                  }
+                }
+              },
+              "xgboost": {
+                "type": "object",
+                "properties": {
+                  "mae": {
+                    "type": "number"
+                  },
+                  "rmse": {
+                    "type": "number"
+                  },
+                  "r2": {
+                    "type": "number"
+                  },
+                  "sign_accuracy": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "ridge_metrics_by_source": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "n": {
+                  "type": "integer"
+                },
+                "margin_mean": {
+                  "type": "number"
+                },
+                "mae": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "available_models": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }

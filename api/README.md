@@ -137,23 +137,37 @@ cuando toque.
     "home_team_id": "...",
     "away_team_id": "...",
     "model": "xgboost",
+    "margin_model": "xgboost",
     "home_rest_days": 0,
     "away_rest_days": 0
   }
   ```
   `source`/`home_team_id`/`away_team_id` son obligatorios; el resto son
   opcionales (`model` por defecto `"xgboost"`, el otro valor valido es
-  `"logreg"`). Devuelve `home_win_probability`/`away_win_probability`
-  mas un array `warnings` (p. ej. si algun equipo lleva pocos partidos
-  jugados esta temporada todavia, misma exigencia -- `min_prior_games`,
-  5 por defecto -- que usa `train.py` para construir el dataset de
-  entrenamiento), `home_elo`/`away_elo` (ver "Rating ELO
-  opponent-adjusted" mas abajo) y `shap_explanation` (ver
-  "Explicabilidad (SHAP)" mas abajo).
+  `"logreg"`; `margin_model` por defecto `"xgboost"`, el otro valor
+  valido es `"ridge"` -- ver "Margen de victoria" mas abajo). Devuelve
+  `home_win_probability`/`away_win_probability` mas un array `warnings`
+  (p. ej. si algun equipo lleva pocos partidos jugados esta temporada
+  todavia, misma exigencia -- `min_prior_games`, 5 por defecto -- que
+  usa `train.py` para construir el dataset de entrenamiento),
+  `home_elo`/`away_elo` (ver "Rating ELO opponent-adjusted" mas abajo),
+  `shap_explanation` (ver "Explicabilidad (SHAP)" mas abajo) y
+  (AÑADIDO 2026-09-22) `predicted_margin`/`margin_model`/
+  `margin_shap_explanation` -- margen de victoria esperado en puntos
+  (positivo = gana el local), `null` si `train_margin.py` no se ha
+  ejecutado todavia (ver "Margen de victoria" mas abajo). Un
+  `margin_model` con un nombre que no existe (p. ej. un typo) devuelve
+  400, igual que un `model` invalido -- solo el caso "nombre valido
+  pero sin entrenar" deja el campo a `null` en vez de fallar.
 - `GET /model/info/shot` -- igual que `/model/info` pero para el modelo
   de tiro: metricas, `sources` (las fuentes con las que se entreno de
   verdad -- ahora mismo NBA, Euroliga, EuroCup y NextGen, ver mas
   abajo), `sanity_check_by_zone`...
+- `GET /model/info/margin` -- (AÑADIDO 2026-09-22) igual que
+  `/model/info` pero para el modelo de MARGEN DE VICTORIA
+  (`train_margin.py`): `mae`/`rmse`/`r2`/`sign_accuracy` de
+  baseline/ridge/xgboost, `feature_cols` (identico a `/model/info`,
+  distinto target), `ridge_metrics_by_source`, `available_models`.
 - `POST /predict_shot` -- cuerpo JSON:
   ```json
   {
@@ -246,10 +260,13 @@ cuando toque.
   feature de este partido concreto) y cada `shap_value` es cuanto
   empuja esa feature la probabilidad hacia arriba (positivo) o hacia
   abajo (negativo) respecto a `base_value`, en el mismo espacio que
-  `home_win_probability`/`make_probability` (NO log-odds) --
+  `home_win_probability`/`make_probability` (NO log-odds; para los
+  modelos de margen, AÑADIDO 2026-09-22, la escala nativa es puntos, no
+  probabilidad, pero la aditividad es la misma) --
   `base_value + suma(shap_value de todas las features) ==
-  home_win_probability` (o `make_probability`) exactamente, verificado
-  contra los 4 modelos reales (diferencia 0.000000). `contributions`
+  home_win_probability` (o `make_probability`, o `predicted_margin`)
+  exactamente, verificado contra los 6 modelos reales (diferencia
+  0.000000). `contributions`
   viene ordenado de mayor a menor peso absoluto, y las columnas
   categoricas de `/predict_shot` (`zone`/`shot_type`/`source`, que
   internamente se expanden en varias columnas one-hot dentro del
@@ -258,18 +275,21 @@ cuando toque.
   feature de `FEATURE_COLS`/`SHOT_FEATURE_COLS`, nunca por cada dummy.
 
   Implementacion: `shap.Explainer(modelo.predict_proba, background)`
-  (API generica de la libreria `shap`, ver `_shap_contributions()` en
-  `src/predict.py`) en vez de `TreeExplainer`, porque `TreeExplainer`
-  falla en real contra `game_outcome_xgb.joblib`/`shot_make_xgb.joblib`
+  para los clasificadores (resultado de partido/tiro) o
+  `shap.Explainer(modelo.predict, background)` para los regresores de
+  margen (Ridge/XGBRegressor no tienen `predict_proba`, AÑADIDO
+  2026-09-22 -- ver `_shap_contributions()` en `src/predict.py`) en vez
+  de `TreeExplainer`, porque `TreeExplainer` falla en real contra
+  `game_outcome_xgb.joblib`/`shot_make_xgb.joblib`/`game_margin_xgb.joblib`
   -- XGBoost 3.x serializa `base_score` como un string tipo array
   (`"[5.8281195E-1]"`) que el parser nativo de `shap` para modelos
   XGBoost no sabe leer (`ValueError: could not convert string to
   float`), y no es corregible por configuracion porque la API interna
   de XGBoost siempre serializa asi. La API generica evita ese camino
-  por completo y funciona igual para regresion logistica y XGBoost.
-  Coste: ~3.5s de calentamiento JIT la primera vez que se llama en el
-  proceso (import + compilacion), luego ~1.5ms por peticion -- no hace
-  falta cache aparte, ya vive dentro del mismo proceso largo del
+  por completo y funciona igual para regresion logistica, XGBoost y
+  Ridge. Coste: ~3.5s de calentamiento JIT la primera vez que se llama
+  en el proceso (import + compilacion), luego ~1.5ms por peticion -- no
+  hace falta cache aparte, ya vive dentro del mismo proceso largo del
   servidor.
 
 Ejemplo de error (equipo sin partidos jugados, fuente desconocida,
@@ -341,6 +361,30 @@ una temporada y la siguiente del mismo equipo es alta en las 8 columnas
 (0.52-0.94 segun la metrica, 461 pares reales de temporadas
 consecutivas) -- no es una suposicion.
 
+**Margen de victoria (añadido 2026-09-22):** ademas de la probabilidad
+de victoria, `/predict` devuelve el margen esperado en puntos
+(`predicted_margin`, positivo = gana el local) usando un segundo modelo
+independiente entrenado por `train_margin.py` -- MISMAS features que el
+modelo de resultado (`diff_*_pre` + `diff_rest_days` + `diff_elo_pre`),
+solo cambia el target (continuo, no binario) y el tipo de modelo
+(regresion). Dos opciones (`margin_model`, por defecto `"xgboost"`):
+Ridge (regularizado con L2 en vez de OLS simple -- `diff_elo_pre` y
+`diff_win_pre` estan correlacionados de verdad, 0.887, y OLS sin
+regularizar seria inestable con esa colinealidad) y XGBoost (mismos
+hiperparametros conservadores que el modelo de resultado). Verificado
+en el split cronologico real de `train_margin.py` (18180 partidos
+utilizables): ambos baten claramente al baseline (predecir siempre la
+media de margen observada) -- MAE 10.6-10.7 puntos frente a 12.4 del
+baseline, R²≈0.26, y un `sign_accuracy` (el signo del margen predicho
+coincide con quien gana de verdad) de ~0.69, comparable al accuracy del
+propio modelo de clasificacion en el mismo periodo -- comprobacion de
+cordura de que el modelo de margen no es peor "adivinando quien gana"
+que el modelo pensado especificamente para eso. Como con el modelo de
+resultado, si `train_margin.py` no se ha ejecutado todavia
+`predicted_margin`/`margin_model`/`margin_shap_explanation` salen a
+`null` en vez de romper `/predict` entero -- es un modelo secundario,
+no bloqueante.
+
 ## Validado
 
 - **Mecanica** (`tests/test_predict_game_outcome.py`, `tests/test_predict_shot.py`
@@ -357,6 +401,17 @@ consecutivas) -- no es una suposicion.
   los casos de error esperados (mismo equipo local/visitante, equipo
   inexistente, fuente sin datos, modelo desconocido, y sus equivalentes
   para el modelo de tiro) lanzan `PredictionError` en vez de reventar.
+- **Mecanica del modelo de margen** (`tests/test_predict_margin.py`,
+  AÑADIDO 2026-09-22): misma base de datos sintetica de
+  `test_predict_game_outcome.py` (via su fixture `game_outcome_env`,
+  reutilizada) + modelos de mentira propios (un Pipeline
+  StandardScaler+Ridge y un XGBRegressor bareo, mismas clases reales que
+  `train_margin.py`) -- comprueba que `predicted_margin`/`margin_model`/
+  `margin_shap_explanation` salen `None` cuando el modelo de margen
+  todavia no esta entrenado (sin romper `/predict`), que un
+  `margin_model` invalido SI lanza `PredictionError` (no se confunde con
+  "no entrenado todavia"), y la aditividad de Shapley del SHAP de
+  margen.
 - **Integracion real** (`tests/test_api_integration.py`, SOLO si ya
   existen los `.joblib`/`basketball.db` reales -- si no existen, cada
   test se salta con `pytest.skip` en vez de fallar, para que la misma
@@ -393,6 +448,16 @@ consecutivas) -- no es una suposicion.
   prior de zona) no un bug del API. No se ha comprobado ningun numero
   contra una casa de apuestas ni fuente externa (no es esa la funcion
   de esta prueba).
+  `GET /model/info/margin` y `predicted_margin`/`margin_model`/
+  `margin_shap_explanation` en `/predict` (AÑADIDO 2026-09-22, tambien
+  ejecutado de verdad contra `data/processed/basketball.db` real):
+  mismo partido Atlanta Hawks (local) - Boston Celtics (visitante) de
+  arriba da `predicted_margin=-2.1` con `margin_model="xgboost"` y
+  `-2.0` con `"ridge"` -- ambos NEGATIVOS (favorecen al visitante),
+  consistente con `home_win_probability=0.445` (< 0.5) del mismo
+  partido: los dos modelos, entrenados por separado con targets
+  distintos, coinciden en direccion. `margin_shap_explanation` aditivo
+  verificado igual que el del modelo de resultado.
 - **Calibracion y limpieza de las 7 competiciones FEB** (sesion
   2026-09-20/21): la calibracion de coordenadas se valido con la
   distribucion real de distancias al aro (pico junto al aro, valle

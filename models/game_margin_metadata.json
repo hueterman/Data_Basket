@@ -1,0 +1,86 @@
+{
+  "target": "margin",
+  "feature_cols": [
+    "diff_pace_40_pre",
+    "diff_ortg_pre",
+    "diff_drtg_pre",
+    "diff_efg_pct_pre",
+    "diff_tov_pct_pre",
+    "diff_orb_pct_pre",
+    "diff_ft_rate_pre",
+    "diff_win_pre",
+    "diff_rest_days",
+    "diff_elo_pre"
+  ],
+  "min_prior_games": 5,
+  "test_frac": 0.2,
+  "n_train": 14545,
+  "n_test": 3635,
+  "metrics": {
+    "baseline": {
+      "mae": 12.413190331386302,
+      "rmse": 15.855579069188083,
+      "r2": -0.0009208153718540668,
+      "sign_accuracy": 0.573314993122421
+    },
+    "ridge": {
+      "mae": 10.621958533592647,
+      "rmse": 13.62197932267342,
+      "r2": 0.2612186235606093,
+      "sign_accuracy": 0.691334250343879
+    },
+    "xgboost": {
+      "mae": 10.667174902475315,
+      "rmse": 13.668930764094364,
+      "r2": 0.2561170699611982,
+      "sign_accuracy": 0.6921595598349382
+    }
+  },
+  "ridge_metrics_by_source": {
+    "acb": {
+      "n": 703,
+      "margin_mean": 3.07823613086771,
+      "mae": 9.531376127002277
+    },
+    "eurocup": {
+      "n": 164,
+      "margin_mean": 2.3902439024390243,
+      "mae": 11.597876139792476
+    },
+    "euroleague": {
+      "n": 317,
+      "margin_mean": 3.526813880126183,
+      "mae": 9.015810498837219
+    },
+    "feb": {
+      "n": 254,
+      "margin_mean": 2.8188976377952755,
+      "mae": 9.704061930040538
+    },
+    "lf2": {
+      "n": 29,
+      "margin_mean": 4.379310344827586,
+      "mae": 9.937873276680946
+    },
+    "lfchallenge": {
+      "n": 200,
+      "margin_mean": 1.185,
+      "mae": 10.44197515521058
+    },
+    "lfendesa": {
+      "n": 200,
+      "margin_mean": 3.245,
+      "mae": 11.232557905369736
+    },
+    "nba": {
+      "n": 1621,
+      "margin_mean": 1.6995681677976557,
+      "mae": 11.347972237284198
+    },
+    "segundafeb": {
+      "n": 147,
+      "margin_mean": 4.285714285714286,
+      "mae": 11.341486892935494
+    }
+  }
+}
