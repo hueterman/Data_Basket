@@ -311,6 +311,9 @@
           "away_used_season_carryover": {
             "type": "boolean",
             "description": "Igual que home_used_season_carryover, para el visitante."
+          },
+          "shap_explanation": {
+            "$ref": "#/components/schemas/ShapExplanation"
           }
         }
       },
@@ -402,6 +405,9 @@
           },
           "make_probability": {
             "type": "number"
+          },
+          "shap_explanation": {
+            "$ref": "#/components/schemas/ShapExplanation"
           }
         }
       },
@@ -619,6 +625,34 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          }
+        }
+      },
+      "ShapContribution": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string"
+          },
+          "shap_value": {
+            "type": "number",
+            "description": "Cuanto empuja esta feature la probabilidad respecto a base_value, en el mismo espacio que home_win_probability/make_probability (no log-odds). Positivo empuja hacia arriba, negativo hacia abajo."
+          }
+        }
+      },
+      "ShapExplanation": {
+        "type": "object",
+        "description": "Desglose SHAP de que feature peso mas en ESTA prediccion concreta (no en el modelo en general). base_value + suma(shap_value de todas las contributions) == home_win_probability/make_probability exactamente. contributions viene ordenado de mayor a menor peso absoluto, con una entrada por cada feature original (las columnas categoricas one-hot de /predict_shot ya vienen agregadas de vuelta a su feature original).",
+        "properties": {
+          "base_value": {
+            "type": "number",
+            "description": "Probabilidad de partida, sin mirar ninguna feature de este partido/tiro concreto."
+          },
+          "contributions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShapContribution"
             }
           }
         }

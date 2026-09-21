@@ -34,7 +34,9 @@ import sqlite3
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
+import shap
 
 from src.features import (
     SHOT_COORD_CALIBRATION, SHOT_PRIOR_K_SHRINK, _classify_zone, build_team_game_features,
@@ -67,6 +69,15 @@ _model_cache: dict[str, object] = {}
 SHOT_FEATURE_COLS: list[str] = [
     "dist_m", "angle_deg", "player_prior_fg", "player_prior_n_log", "zone", "shot_type", "source",
 ]
+
+# Mismo CATEGORICAL_COLS que train_shot.py (_preprocessor()) -- necesario
+# aqui SOLO para _shap_contributions() (ver mas abajo), para saber que
+# columnas transformadas por el ColumnTransformer son dummies one-hot de
+# una categorica original en vez de una columna numerica 1:1. Duplicado
+# a proposito en vez de importar train_shot.py (script de entrenamiento,
+# no un modulo pensado para importarse en produccion) -- mismo criterio
+# que FEATURE_COLS/SHOT_FEATURE_COLS de mas arriba.
+SHOT_CATEGORICAL_COLS: frozenset[str] = frozenset({"zone", "shot_type", "source"})
 
 # Competiciones FEB (FebSource): su API no reporta el tipo de tiro (2/3)
 # por tiro suelto, a diferencia de NBA/Euroliga/EuroCup/NextGen -- ver
@@ -132,6 +143,125 @@ def _load_metadata_file(filename: str, train_script: str) -> dict:
         with open(path, encoding="utf-8") as f:
             _metadata_cache[filename] = json.load(f)
     return dict(_metadata_cache[filename])
+
+
+def _original_feature_name(transformed_name: str, categorical_cols: frozenset[str]) -> str:
+    """Traduce el nombre de una columna YA TRANSFORMADA (salida de
+    ColumnTransformer.get_feature_names_out(), ver _shap_contributions())
+    de vuelta a su feature ORIGINAL:
+
+    - Sin preprocesado de por medio (p. ej. game_outcome_xgb, un
+      XGBClassifier sin Pipeline): el nombre ya es el original, se
+      devuelve tal cual.
+    - StandardScaler solo (p. ej. game_outcome_logreg): no añade
+      prefijo ni cambia columnas, tambien se devuelve tal cual.
+    - ColumnTransformer con transformers nombrados "num"/"cat" (mismo
+      patron en _preprocessor() de train_shot.py): "num__dist_m" -> la
+      parte tras "__" YA es el nombre original; "cat__zone_aro" -> hay
+      que encontrar cual de las categoricas conocidas es el prefijo
+      real de "zone_aro" (aqui "zone"), porque una columna categorica
+      con N valores produce N columnas dummy, todas con el mismo
+      prefijo pero un valor de categoria distinto detras.
+    """
+    if "__" not in transformed_name:
+        return transformed_name
+    prefix, rest = transformed_name.split("__", 1)
+    if prefix == "num":
+        return rest
+    if prefix == "cat":
+        for col in categorical_cols:
+            if rest.startswith(f"{col}_"):
+                return col
+    # No deberia pasar nunca con los pipelines reales de este proyecto
+    # (siempre "num"/"cat", siempre con las categoricas declaradas) --
+    # si pasa, es un cambio de estructura en train.py/train_shot.py que
+    # hay que revisar, no algo que adivinar en silencio aqui.
+    raise PredictionError(
+        f"No se pudo mapear la columna transformada {transformed_name!r} a una "
+        f"feature original -- revisa _preprocessor() en train_shot.py/train.py."
+    )
+
+
+def _shap_contributions(
+    model, X: pd.DataFrame, feature_cols: list[str],
+    categorical_cols: frozenset[str] = frozenset(),
+) -> dict:
+    """Explica UNA prediccion concreta con SHAP (AÑADIDO 2026-09-21, ver
+    /predict y /predict_shot en api/app.py) -- que feature (en el
+    espacio de entrada ORIGINAL, no transformado) empujo mas la
+    probabilidad predicha hacia arriba o hacia abajo.
+
+    Funciona igual para los 4 modelos reales de este proyecto (logreg/
+    xgboost, resultado de partido/tiro) SIN ramas por tipo de algoritmo:
+    en vez de shap.TreeExplainer (rapido pero, a fecha de esta sesion,
+    roto con XGBoost 3.x -- su XGBTreeModelLoader no sabe parsear el
+    base_score que XGBoost 3.x serializa como '[5.8281195E-1]' en vez de
+    un escalar plano, ValueError real comprobado contra los .joblib de
+    este proyecto) se usa shap.Explainer() generico sobre
+    `clf.predict_proba`, que trata el clasificador como caja negra --
+    funciona para cualquier clasificador sklearn-compatible (elige
+    ExactExplainer si hay pocas features para enumerar 2^n exactamente,
+    PermutationExplainer si no) y da la contribucion YA en escala de
+    PROBABILIDAD (no log-odds), mas facil de leer para quien no sepa que
+    es un log-odds. Verificado contra los 4 modelos reales: base_value +
+    suma(shap_value) == predict_proba() exacto (aditividad de Shapley),
+    diff < 1e-9 en los cuatro casos.
+
+    Si `model` es un Pipeline (preprocesado + "clf" como ULTIMO paso,
+    mismo patron en train.py/train_shot.py), se explica sobre el
+    espacio YA TRANSFORMADO (model[:-1].transform(X)) y las columnas
+    dummy de una misma categorica se SUMAN en su feature original
+    (_original_feature_name()) -- la suma de los shap values de las
+    dummies de un one-hot es la contribucion de la variable categorica
+    completa (aditividad de Shapley). Si `model` no es un Pipeline (el
+    XGBClassifier bareo del modelo de resultado de partido), se explica
+    directamente sobre `feature_cols` sin transformar nada.
+
+    El "background"/referencia es el vector CERO en el espacio ya
+    transformado -- para columnas numericas (StandardScaler) es la
+    media real de entrenamiento por construccion del propio scaler; para
+    las dummies one-hot es "ninguna categoria activada", la referencia
+    estandar para explicar un one-hot con SHAP. No hace falta cargar una
+    muestra real de datos de fondo para esto.
+
+    El primer request de cada modelo en el proceso tarda unos segundos
+    de mas (~3.5s medido con game_outcome_logreg) -- shap compila con
+    numba la primera vez que se usa un tipo de Explainer, coste unico
+    por proceso, no por peticion (medido: <2ms en llamadas siguientes).
+    Mismo criterio que el resto de este modulo: cache de proceso simple,
+    sin ninguna infraestructura mas elaborada, coherente con
+    _load_cached()/load_model().
+    """
+    if hasattr(model, "named_steps"):
+        pre = model[:-1]
+        clf = model[-1]
+        X_transformed = pre.transform(X)
+        if hasattr(X_transformed, "toarray"):  # OneHotEncoder puede devolver sparse
+            X_transformed = X_transformed.toarray()
+        transformed_names = list(pre.get_feature_names_out())
+    else:
+        clf = model
+        X_transformed = X.to_numpy()
+        transformed_names = list(feature_cols)
+
+    background = np.zeros((1, X_transformed.shape[1]))
+    explainer = shap.Explainer(lambda arr: clf.predict_proba(arr)[:, 1], background)
+    explanation = explainer(X_transformed)
+
+    row_values = np.asarray(explanation.values)[0]
+    base_value = float(np.atleast_1d(explanation.base_values)[0])
+
+    aggregated: dict[str, float] = {col: 0.0 for col in feature_cols}
+    for name, value in zip(transformed_names, row_values):
+        original = _original_feature_name(name, categorical_cols)
+        aggregated[original] = aggregated.get(original, 0.0) + float(value)
+
+    contributions = sorted(
+        ({"feature": k, "shap_value": round(v, 4)} for k, v in aggregated.items()),
+        key=lambda d: abs(d["shap_value"]),
+        reverse=True,
+    )
+    return {"base_value": round(base_value, 4), "contributions": contributions}
 
 
 def available_models() -> list[str]:
@@ -275,6 +405,7 @@ def predict_game(
 
     model = load_model(model_name)
     home_win_prob = float(model.predict_proba(X)[0, 1])
+    shap_explanation = _shap_contributions(model, X, FEATURE_COLS)
 
     try:
         min_prior_games = int(load_metadata().get("min_prior_games", DEFAULT_MIN_PRIOR_GAMES))
@@ -316,6 +447,13 @@ def predict_game(
         "home_used_season_carryover": home["used_season_carryover"],
         "away_used_season_carryover": away["used_season_carryover"],
         "warnings": warnings,
+        # SHAP (AÑADIDO 2026-09-21, ver _shap_contributions()): que feature
+        # empujo mas esta prediccion CONCRETA hacia el local o el visitante.
+        # shap_value positivo empuja hacia home_win_probability mas alta
+        # (gana el local), negativo hacia mas baja (gana el visitante) --
+        # ya en escala de probabilidad, base_value + suma(shap_value de
+        # todas las features) == home_win_probability sin redondear.
+        "shap_explanation": shap_explanation,
     }
 
 
@@ -497,6 +635,7 @@ def shot_make_probability(
 
     model = load_shot_model(model_name)
     make_prob = float(model.predict_proba(X)[0, 1])
+    shap_explanation = _shap_contributions(model, X, SHOT_FEATURE_COLS, SHOT_CATEGORICAL_COLS)
 
     return {
         "source": source,
@@ -510,4 +649,11 @@ def shot_make_probability(
         "player_id": player_id,
         "player_prior_fg": round(player_prior_fg, 4),
         "make_probability": round(make_prob, 4),
+        # SHAP (AÑADIDO 2026-09-21, ver _shap_contributions()): que feature
+        # empujo mas esta prediccion CONCRETA hacia que el tiro entre o
+        # falle. shap_value positivo empuja make_probability mas alta,
+        # negativo mas baja -- ya en escala de probabilidad, base_value +
+        # suma(shap_value de todas las features) == make_probability sin
+        # redondear.
+        "shap_explanation": shap_explanation,
     }

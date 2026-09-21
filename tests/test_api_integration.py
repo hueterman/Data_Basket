@@ -95,6 +95,28 @@ def test_predict_with_real_teams(api_client):
     assert r.status_code == 200
     assert 0.0 <= pred["home_win_probability"] <= 1.0
 
+    # SHAP (AÑADIDO 2026-09-21) -- contra el modelo REAL (xgboost por
+    # defecto, un XGBClassifier bareo) Y logreg (un Pipeline real
+    # StandardScaler+LogisticRegression, caso que las fixtures
+    # sinteticas de test_predict_game_outcome.py NO cubren porque su
+    # modelo de mentira es una LogisticRegression bareo) -- aditividad
+    # de Shapley: base_value + suma(shap_value) == home_win_probability.
+    for model_name in ("xgboost", "logreg"):
+        r = api_client.post("/predict", json={
+            "source": real_source, "home_team_id": home_id, "away_team_id": away_id,
+            "model": model_name,
+        })
+        pred = r.get_json()
+        assert r.status_code == 200
+        exp = pred["shap_explanation"]
+        assert {c["feature"] for c in exp["contributions"]} == {
+            "diff_pace_40_pre", "diff_ortg_pre", "diff_drtg_pre", "diff_efg_pct_pre",
+            "diff_tov_pct_pre", "diff_orb_pct_pre", "diff_ft_rate_pre", "diff_win_pre",
+            "diff_rest_days",
+        }
+        total = exp["base_value"] + sum(c["shap_value"] for c in exp["contributions"])
+        assert total == pytest.approx(pred["home_win_probability"], abs=1e-3)
+
     # Peticion mal formada -- debe devolver 400, no un 500.
     r = api_client.post("/predict", json={"source": real_source, "home_team_id": home_id})
     assert r.status_code == 400
@@ -123,6 +145,19 @@ def test_predict_shot_with_real_models(api_client, real_predict_mod):
         f"un tiro junto al aro deberia ser mas facil que un triple de arco "
         f"(salio {p_rim} vs {p_three}) -- comprobacion de cordura basica"
     )
+
+    # SHAP (AÑADIDO 2026-09-21) -- contra el Pipeline REAL con
+    # ColumnTransformer (StandardScaler+OneHotEncoder) del tiro junto al
+    # aro de arriba: las columnas dummy one-hot deben agregarse en sus 3
+    # features categoricas originales (zone/shot_type/source), nunca
+    # aparecer sueltas como "zone_aro"/"source_nba".
+    exp = r_rim.get_json()["shap_explanation"]
+    assert {c["feature"] for c in exp["contributions"]} == {
+        "dist_m", "angle_deg", "player_prior_fg", "player_prior_n_log",
+        "zone", "shot_type", "source",
+    }
+    total = exp["base_value"] + sum(c["shap_value"] for c in exp["contributions"])
+    assert total == pytest.approx(r_rim.get_json()["make_probability"], abs=1e-3)
 
     r_feb_ok = api_client.post("/predict_shot", json={
         "source": "feb", "x_m": 0.5, "y_m": 1.0, "shot_type": "desconocido",

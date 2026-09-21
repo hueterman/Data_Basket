@@ -25,6 +25,7 @@ mplbasketball
 scikit-learn
 xgboost
 joblib
+shap  # explicabilidad (SHAP) en /predict y /predict_shot, ver src/predict.py
 
 # --- Servicio ---
 flask

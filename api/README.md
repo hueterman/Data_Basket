@@ -147,7 +147,8 @@ cuando toque.
   mas un array `warnings` (p. ej. si algun equipo lleva pocos partidos
   jugados esta temporada todavia, misma exigencia -- `min_prior_games`,
   5 por defecto -- que usa `train.py` para construir el dataset de
-  entrenamiento).
+  entrenamiento) y `shap_explanation` (ver "Explicabilidad (SHAP)" mas
+  abajo).
 - `GET /model/info/shot` -- igual que `/model/info` pero para el modelo
   de tiro: metricas, `sources` (las fuentes con las que se entreno de
   verdad -- ahora mismo NBA, Euroliga, EuroCup y NextGen, ver mas
@@ -177,7 +178,8 @@ cuando toque.
   el acierto medio de liga de esa zona ("jugador medio"). Devuelve
   `make_probability`, `player_prior_fg` (el prior usado, de jugador o de
   liga) y `zone`/`dist_m`/`angle_deg` ya calculados con las mismas
-  formulas que `src/features.py`.
+  formulas que `src/features.py`, mas `shap_explanation` (ver
+  "Explicabilidad (SHAP)" mas abajo).
 
   **Solo fuentes con coordenadas de tiro CALIBRADAS y con las que el
   modelo se entreno de verdad** (`GET /model/info/shot` -> `sources`
@@ -224,6 +226,50 @@ cuando toque.
   de `shots` cuando se pasa `player_id`; sin `player_id` se usa
   directamente el acierto de liga guardado en la metadata del modelo
   (`league_zone_fg`), sin tocar la base de datos.
+
+**Explicabilidad (SHAP) (añadido 2026-09-21):** tanto `/predict` como
+  `/predict_shot` devuelven ahora `shap_explanation`, un desglose de
+  QUE feature peso mas en esa prediccion CONCRETA (no en el modelo en
+  general) -- pensado para enseñar el modelo en clase, no solo su
+  resultado. Forma:
+  ```json
+  {
+    "base_value": 0.5123,
+    "contributions": [
+      {"feature": "diff_efg", "shap_value": 0.0842},
+      {"feature": "diff_rest_days", "shap_value": -0.0031}
+    ]
+  }
+  ```
+  `base_value` es la probabilidad "de partida" (sin mirar ninguna
+  feature de este partido concreto) y cada `shap_value` es cuanto
+  empuja esa feature la probabilidad hacia arriba (positivo) o hacia
+  abajo (negativo) respecto a `base_value`, en el mismo espacio que
+  `home_win_probability`/`make_probability` (NO log-odds) --
+  `base_value + suma(shap_value de todas las features) ==
+  home_win_probability` (o `make_probability`) exactamente, verificado
+  contra los 4 modelos reales (diferencia 0.000000). `contributions`
+  viene ordenado de mayor a menor peso absoluto, y las columnas
+  categoricas de `/predict_shot` (`zone`/`shot_type`/`source`, que
+  internamente se expanden en varias columnas one-hot dentro del
+  Pipeline) se agregan de vuelta a la feature original antes de
+  devolverse, para que la lista siempre tenga una entrada por cada
+  feature de `FEATURE_COLS`/`SHOT_FEATURE_COLS`, nunca por cada dummy.
+
+  Implementacion: `shap.Explainer(modelo.predict_proba, background)`
+  (API generica de la libreria `shap`, ver `_shap_contributions()` en
+  `src/predict.py`) en vez de `TreeExplainer`, porque `TreeExplainer`
+  falla en real contra `game_outcome_xgb.joblib`/`shot_make_xgb.joblib`
+  -- XGBoost 3.x serializa `base_score` como un string tipo array
+  (`"[5.8281195E-1]"`) que el parser nativo de `shap` para modelos
+  XGBoost no sabe leer (`ValueError: could not convert string to
+  float`), y no es corregible por configuracion porque la API interna
+  de XGBoost siempre serializa asi. La API generica evita ese camino
+  por completo y funciona igual para regresion logistica y XGBoost.
+  Coste: ~3.5s de calentamiento JIT la primera vez que se llama en el
+  proceso (import + compilacion), luego ~1.5ms por peticion -- no hace
+  falta cache aparte, ya vive dentro del mismo proceso largo del
+  servidor.
 
 Ejemplo de error (equipo sin partidos jugados, fuente desconocida,
 `home_team_id == away_team_id`, modelo inexistente, o modelos sin
