@@ -626,8 +626,29 @@ if __name__ == "__main__":
     # servicios locales). Ver docstring del modulo para cambiarlo sin
     # tocar el codigo (variable de entorno PORT).
     port = int(os.environ.get("PORT", 5050))
-    # threaded=True: el panel de ingestas hace polling (una peticion cada
-    # 2s a /ingestas/estado.json) mientras el navegador sigue cargando
-    # otras paginas -- sin esto, el servidor de desarrollo de Flask
-    # atiende una peticion a la vez.
-    app.run(debug=True, port=port, threaded=True)
+    # PRODUCTION=1 (AÑADIDO 2026-09-21, mismo patron que api/app.py --
+    # ver su comentario de cabecera para el razonamiento completo):
+    # sirve con waitress en vez del servidor de desarrollo de Flask, sin
+    # el WARNING de "development server" ni el depurador interactivo de
+    # Werkzeug (PIN incluido) activo. A diferencia de api/app.py, aqui
+    # se sigue sirviendo SOLO en 127.0.0.1 (nunca 0.0.0.0) -- esta app
+    # no esta pensada para tunel/demo (ver docstring del modulo, "SOLO
+    # LECTURA... para mirar lo que ya hay guardado"), asi que no hay
+    # motivo para exponerla fuera de este equipo aunque se use waitress.
+    # Por defecto (sin PRODUCTION=1) el comportamiento NO cambia --
+    # sigue siendo debug=True con auto-reload, para no romper el flujo
+    # de trabajo habitual mientras se sigue tocando la app.
+    #
+    # threaded=True (rama de desarrollo) / hilos de waitress (rama de
+    # produccion, parametro `threads`, default 4 de la propia libreria):
+    # el panel de ingestas hace polling (una peticion cada 2s a
+    # /ingestas/estado.json) mientras el navegador sigue cargando otras
+    # paginas -- sin peticiones concurrentes de verdad, eso se quedaria
+    # bloqueado.
+    if os.environ.get("PRODUCTION") == "1":
+        from waitress import serve
+        print(f"Sirviendo con waitress (modo produccion, SIN depurador/auto-reload) en "
+              f"http://127.0.0.1:{port}")
+        serve(app, host="127.0.0.1", port=port)
+    else:
+        app.run(debug=True, port=port, threaded=True)
