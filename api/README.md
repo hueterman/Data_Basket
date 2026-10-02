@@ -26,20 +26,20 @@ pip install -r requirements.txt   # ya incluye flask, scikit-learn, xgboost, job
 python api/app.py
 ```
 
-Escucha en <http://127.0.0.1:5060>. Puerto configurable sin tocar el
+Escucha en <http://127.0.0.1:5051>. Puerto configurable sin tocar el
 codigo con la variable de entorno `PORT` (p. ej. `PORT=5061 python
 api/app.py`), igual que `app/app.py`.
 
 ## Documentacion interactiva (Swagger UI)
 
-Con el servidor arrancado, <http://127.0.0.1:5060/docs/> abre una
+Con el servidor arrancado, <http://127.0.0.1:5051/docs/> abre una
 interfaz donde se puede ver cada endpoint (parametros, forma real del
 JSON de entrada/salida, codigos de error) y PROBARLO desde el propio
 navegador ("Try it out"), sin fabricar peticiones a mano con curl o
 Postman. El spec en si (OpenAPI 3.0, escrito a mano en
 `api/openapi.json` para que describa el comportamiento REAL de cada
 ruta, no algo generado por introspeccion) esta en
-<http://127.0.0.1:5060/openapi.json> -- importable directamente en
+<http://127.0.0.1:5051/openapi.json> -- importable directamente en
 Postman/Insomnia, o para generar un cliente automatico en otro
 lenguaje.
 
@@ -71,7 +71,7 @@ python api\app.py
 $env:PRODUCTION=1                 (PowerShell)
 python api\app.py
 ```
-Sirve con `waitress` en <http://127.0.0.1:5060> (o el puerto que
+Sirve con `waitress` en <http://127.0.0.1:5051> (o el puerto que
 marques con `PORT`). `debug=True` (el modo por defecto sin
 `PRODUCTION=1`) deja activo el depurador interactivo de Werkzeug, que
 permite ejecutar codigo arbitrario desde el navegador en cualquier
@@ -85,14 +85,14 @@ peticiones HTTP a tu proceso local):
 - **Cloudflare Quick Tunnel** (`cloudflared`) -- no requiere cuenta ni
   registro, un solo comando:
   ```
-  cloudflared tunnel --url http://localhost:5060
+  cloudflared tunnel --url http://localhost:5051
   ```
   Imprime una URL publica `https://algo-aleatorio.trycloudflare.com`
   que reenvia a tu API mientras el comando siga corriendo.
 - **ngrok** -- requiere crear una cuenta gratuita y configurar un
   authtoken una vez (`ngrok config add-authtoken ...`), luego:
   ```
-  ngrok http 5060
+  ngrok http 5051
   ```
   Tambien imprime una URL publica temporal (plan gratuito: cambia cada
   vez que reinicias el tunel).

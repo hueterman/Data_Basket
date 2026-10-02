@@ -22,7 +22,7 @@ src/predict.py).
 Uso:
     pip install -r requirements.txt   # ya incluye flask y waitress
     python api/app.py
-    -> escucha en http://127.0.0.1:5060 (servidor de desarrollo de
+    -> escucha en http://127.0.0.1:5051 (servidor de desarrollo de
        Flask, con el depurador interactivo activo -- SOLO localhost,
        nunca lo expongas a internet asi)
 
@@ -345,7 +345,12 @@ def predict_shot():
 
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5060))
+    port = int(os.environ.get("PORT", 5051))  # cerca del 5050 de app/app.py
+    # a proposito (CAMBIADO 2026-10-02, antes 5060): Pedro pidio acercarlo
+    # al puerto del explorador de datos para no confundirlo con otra app
+    # suya que ya ocupa el 5000 -- sigue siendo DISTINTO del 5050 real de
+    # app/app.py (ver su docstring) para poder tener las dos corriendo a
+    # la vez sin chocar.
     # PRODUCTION=1 (AÑADIDO 2026-09-21, ver "Despliegue para demos" en
     # api/README.md): sirve con waitress (servidor WSGI de verdad, puro
     # Python, funciona en Windows sin compilador a diferencia de
