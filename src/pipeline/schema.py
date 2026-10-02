@@ -158,6 +158,130 @@ DDL_STATEMENTS: tuple[str, ...] = (
         notes TEXT
     )
     """,
+    # -------------------------------------------------------------------
+    # Modulo de lenguaje (declaraciones de entrenadores), añadido
+    # 2026-09-27: herramienta INTERNA de analisis (no pieza de portfolio
+    # publico), ver decisiones_proyecto.md. Cinco tablas nuevas, todas
+    # colgando de `games`/`teams`/`players` ya existentes -- el cruce con
+    # resultado/margen/minutos es gratis, no hay que duplicar nada de lo
+    # ya scrapeado.
+    #
+    # Decisiones de diseno especificas de este modulo:
+    #
+    # - `coaches` es una copia deliberada de la forma de `players` (mismo
+    #   PK compuesto, mismo caveat de team_id como "ultimo equipo visto,
+    #   no historico") -- un entrenador es, a efectos de esquema, la
+    #   misma clase de entidad que un jugador.
+    #
+    # - `statements` NO tiene clave natural: un club puede republicar o
+    #   corregir la misma nota, dos declaraciones del mismo entrenador el
+    #   mismo dia son posibles (rueda de prensa + redes del club) -- id
+    #   autoincremental, igual que `shots`.
+    #
+    # - `statement_type` y `author_type` son NOT NULL a proposito, sin
+    #   valor por defecto: es la primera leccion del articulo que motiva
+    #   este modulo -- comparar una nota institucional de un club con una
+    #   declaracion textual de otro como si fueran la misma cosa mide el
+    #   estilo del gabinete de comunicacion, no el discurso del
+    #   entrenador. Un valor ausente aqui debe fallar la ingesta, no
+    #   colarse como NULL silencioso.
+    #
+    # - `coach_id` en `statements` SI es nullable: una nota de club puede
+    #   ser un resumen de partido sin atribucion clara a un entrenador
+    #   concreto -- mejor NULL explicito que forzar una atribucion
+    #   inventada.
+    #
+    # - `statement_nlp` esta separada del texto crudo de `statements`
+    #   (mismo criterio ya aplicado a `shots`/`team_stats` frente a la
+    #   cache de `data/raw/`): el texto es el dato fuente, el sentimiento
+    #   es derivado y recalculable. La PK incluye `model_version` a
+    #   proposito -- el plan de este modulo compara explicitamente un
+    #   baseline lexico con un LLM sobre las mismas declaraciones, y las
+    #   dos pasadas deben poder convivir sin pisarse.
+    #
+    # - `statement_mentions` reutiliza el diccionario de `players` ya
+    #   ingerido (nombre + alias por equipo) en vez de NER generico -- ver
+    #   plano del modulo. `mention_count` (no solo un booleano) porque la
+    #   metrica de "menciones vs. minutos jugados" del articulo necesita
+    #   frecuencia, no solo presencia.
+    #
+    # - `statement_concepts` usa una taxonomia tactica FIJA en codigo
+    #   (mismo espiritu que ALL_SOURCES/TRAINABLE_SOURCES en
+    #   src/scraper/base.py), no una tabla de conceptos aparte -- la
+    #   lista es corta y cambia por decision de analisis, no por dato
+    #   scrapeado. `present` ademas de `mention_count`: la metrica de
+    #   "ausencia de concepto tras derrota ajustada" del articulo mide
+    #   precisamente cuando `present = 0`, y dejar esa columna explicita
+    #   evita tener que inferir ausencia de una tabla que simplemente no
+    #   tiene fila para ese concepto.
+    # -------------------------------------------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS coaches (
+        source TEXT NOT NULL,
+        coach_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        PRIMARY KEY (source, coach_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS statements (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source TEXT NOT NULL,
+        game_id TEXT NOT NULL,
+        team_id TEXT NOT NULL,
+        coach_id TEXT,
+        statement_type TEXT NOT NULL,
+        author_type TEXT NOT NULL,
+        text TEXT NOT NULL,
+        url TEXT,
+        published_at TEXT,
+        scraped_at TEXT NOT NULL,
+        FOREIGN KEY (source, game_id) REFERENCES games (source, game_id),
+        FOREIGN KEY (source, team_id) REFERENCES teams (source, team_id),
+        FOREIGN KEY (source, coach_id) REFERENCES coaches (source, coach_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_statements_game
+        ON statements (source, game_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_statements_coach
+        ON statements (source, coach_id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS statement_nlp (
+        statement_id INTEGER NOT NULL,
+        model_version TEXT NOT NULL,
+        sentiment_score REAL NOT NULL,
+        sentiment_label TEXT NOT NULL,
+        processed_at TEXT NOT NULL,
+        PRIMARY KEY (statement_id, model_version),
+        FOREIGN KEY (statement_id) REFERENCES statements (id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS statement_mentions (
+        statement_id INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        player_id TEXT NOT NULL,
+        mention_count INTEGER NOT NULL,
+        PRIMARY KEY (statement_id, source, player_id),
+        FOREIGN KEY (statement_id) REFERENCES statements (id),
+        FOREIGN KEY (source, player_id) REFERENCES players (source, player_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS statement_concepts (
+        statement_id INTEGER NOT NULL,
+        concept TEXT NOT NULL,
+        present INTEGER NOT NULL,
+        mention_count INTEGER NOT NULL,
+        PRIMARY KEY (statement_id, concept),
+        FOREIGN KEY (statement_id) REFERENCES statements (id)
+    )
+    """,
 )
 
 
