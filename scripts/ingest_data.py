@@ -9,9 +9,29 @@ numero de partidos -- ingiere la temporada completa de cada fuente.
 IMPORTANTE: ejecutar esto en tu propio equipo, en una terminal normal,
 NO a traves del bridge de este chat (sin salida de red).
 
-Por defecto ingiere las cuatro fuentes con temporada ya cerrada y
-completa (rapidas de verdad, sin necesidad de acotar nada):
-    NBA (season 2025-26), WNBA (2024), Euroliga (E2024), EuroCup (U2024)
+Por defecto ingiere cuatro fuentes (rapidas de verdad, sin necesidad de
+acotar nada): Euroliga (E2024) y EuroCup (U2024), con temporada ya
+cerrada y completa, mas NBA y WNBA -- estas dos ACTUALIZADO 2026-10-02:
+ya NO son temporadas cerradas, apuntan a las de la 2026-27/2026 en
+curso (ver "AÑADIDO 2026-10-02" mas abajo) y necesitan refrescarse
+periodicamente con --no-cache, igual que la familia FEB -- ver
+scripts/weekly_ingest_current_seasons.bat, que ya las incluye.
+    NBA (season 2026-27), WNBA (2026), Euroliga (E2024), EuroCup (U2024)
+
+AÑADIDO 2026-10-02: NBA 2026-27 arranca el 20 de octubre de 2026 (cero
+partidos jugados antes de esa fecha, misma situacion que las fuentes
+FEB mas abajo hasta que empiezan) -- SEASONS["nba"] actualizado de
+"2025-26" a "2026-27". WNBA 2026 esta en playoffs AHORA MISMO (empezaron
+27 de septiembre, podrian llegar hasta el 31 de octubre) --
+SEASONS["wnba"] actualizado de "2024" (dos temporadas atras) a "2026".
+Las dos se añaden a scripts/weekly_ingest_current_seasons.bat con
+--no-cache por el mismo motivo que la familia FEB: list_games() se
+cachea entero (ver raw_cache.py/ingest.py), asi que sin --no-cache un
+partido nuevo jugado esta semana nunca aparece. CBB se queda fuera a
+proposito (temporada 2026-27 arranca a primeros de noviembre, Y el
+problema de coste de --no-cache sobre miles de partidos sigue sin
+resolver -- ver aviso mas abajo, pendiente de una ingesta incremental
+real antes de automatizarlo).
 
 CBB y ACB/FEB (Primera FEB Y Liga Femenina Endesa) se dejan fuera por
 defecto:
@@ -93,8 +113,8 @@ from src.pipeline import get_connection, ingest_source
 from src.pipeline.ingest import RateLimitedError
 
 SEASONS = {
-    "nba": "2025-26",
-    "wnba": "2024",
+    "nba": "2026-27",   # ACTUALIZADO 2026-10-02 (arranca 20 oct 2026), ver docstring
+    "wnba": "2026",     # ACTUALIZADO 2026-10-02 (playoffs en curso), ver docstring
     "euroleague": "E2024",
     "eurocup": "U2024",
     "cbb": "2024",
