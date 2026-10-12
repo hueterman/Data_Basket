@@ -38,7 +38,13 @@ def _team_pairs(open_conn, limit: int = 6) -> list[tuple[str, str, str]]:
     return pairs
 
 
-def warm_models(open_conn, log=print) -> list[tuple[str, bool, float]]:
+def _log(msg: str) -> None:
+    # flush=True: bajo systemd stdout no es una terminal y Python lo guarda en
+    # un bufer -- sin esto las lineas "[warmup]" no aparecerian en journalctl.
+    print(msg, flush=True)
+
+
+def warm_models(open_conn, log=_log) -> list[tuple[str, bool, float]]:
     """Calienta los modelos de tiro, resultado y margen. Devuelve
     [(etiqueta, ok, segundos)] -- util para tests y para el log."""
     predict = importlib.import_module("src.predict")

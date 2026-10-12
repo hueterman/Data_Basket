@@ -176,6 +176,7 @@ limiter = Limiter(
     app=app,
     default_limits=[],
     headers_enabled=True,
+    storage_uri="memory://",  # el valor por defecto, explicito (silencia el aviso al arrancar)
 )
 
 # Documentacion OpenAPI/Swagger (AÑADIDO 2026-09-21, punto 6 del roadmap):
