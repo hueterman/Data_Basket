@@ -42,6 +42,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src import perf
+perf.apply_thread_limits()  # antes de importar numpy/sklearn/xgboost (ver src/perf.py)
+
 from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for
 
 import jobs
@@ -399,6 +402,24 @@ def shot_chart(source, game_id):
     if not shots:
         abort(404, "Este partido no tiene tiros guardados")
 
+    # Cache en disco (perfil "pi" o SHOT_CACHE=1, ver src/perf.py): generar el
+    # PNG con matplotlib es lo mas caro de esta app en una Raspberry Pi. La
+    # clave incluye el numero de tiros y de anotados, asi que si una
+    # reingesta cambia los datos del partido se genera uno nuevo solo.
+    from src import perf
+    cache_file = None
+    if perf.settings()["shot_cache"]:
+        import hashlib
+        key = hashlib.sha1(
+            f"{source}|{game_id}|{len(shots)}|{sum(1 for s in shots if s['made'])}".encode()
+        ).hexdigest()
+        cache_file = perf.SHOT_CACHE_DIR / f"{key}.png"
+        try:
+            if cache_file.exists():
+                return Response(cache_file.read_bytes(), mimetype="image/png")
+        except OSError:
+            cache_file = None
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -435,7 +456,16 @@ def shot_chart(source, game_id):
     fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
     plt.close(fig)
     buf.seek(0)
-    return Response(buf.getvalue(), mimetype="image/png")
+    png = buf.getvalue()
+    if cache_file is not None:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_file.with_suffix(".tmp")
+            tmp.write_bytes(png)
+            tmp.replace(cache_file)  # escritura atomica: nunca se sirve un PNG a medias
+        except OSError:
+            pass  # la cache es opcional: si falla, se sirve igual
+    return Response(png, mimetype="image/png")
 
 
 # --------------------------------------------------------------------- #
@@ -652,6 +682,7 @@ if __name__ == "__main__":
         host = os.environ.get("HOST", "127.0.0.1")
         print(f"Sirviendo con waitress (modo produccion, SIN depurador/auto-reload) en "
               f"http://{host}:{port}")
-        serve(app, host=host, port=port)
+        from src import perf
+        serve(app, host=host, port=port, threads=perf.settings()["waitress_threads"])
     else:
         app.run(debug=True, port=port, threaded=True)

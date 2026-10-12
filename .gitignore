@@ -1,6 +1,7 @@
 data/raw/
 data/processed/
 data/ingest_runs/
+data/cache/
 *.csv
 *.db
 .venv/

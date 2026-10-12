@@ -133,6 +133,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src import perf
+perf.apply_thread_limits()  # antes de importar numpy/sklearn/xgboost (ver src/perf.py)
+
 from flask import Flask, jsonify, request, send_from_directory
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -367,6 +370,7 @@ if __name__ == "__main__":
         from waitress import serve
         print(f"Sirviendo con waitress (modo produccion/demo, SIN depurador) en "
               f"http://0.0.0.0:{port}")
-        serve(app, host="0.0.0.0", port=port)
+        from src import perf
+        serve(app, host="0.0.0.0", port=port, threads=perf.settings()["waitress_threads"])
     else:
         app.run(debug=True, port=port)

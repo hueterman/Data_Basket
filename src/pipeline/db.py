@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from src import perf
 from src.pipeline.schema import init_db
 
 # Raiz del proyecto = dos niveles por encima de este fichero
@@ -56,5 +57,6 @@ def get_connection(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
+    perf.apply_sqlite_pragmas(conn)  # cache/mmap/synchronous segun perfil (ver src/perf.py)
     init_db(conn)
     return conn
