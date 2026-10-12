@@ -647,8 +647,11 @@ if __name__ == "__main__":
     # bloqueado.
     if os.environ.get("PRODUCTION") == "1":
         from waitress import serve
+        # HOST (AÑADIDO 2026-10-12): por defecto sigue siendo 127.0.0.1; en la
+        # Raspberry Pi el servicio systemd pone HOST=0.0.0.0 para verla en la LAN.
+        host = os.environ.get("HOST", "127.0.0.1")
         print(f"Sirviendo con waitress (modo produccion, SIN depurador/auto-reload) en "
-              f"http://127.0.0.1:{port}")
-        serve(app, host="127.0.0.1", port=port)
+              f"http://{host}:{port}")
+        serve(app, host=host, port=port)
     else:
         app.run(debug=True, port=port, threaded=True)
