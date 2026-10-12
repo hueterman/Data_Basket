@@ -65,3 +65,54 @@ def test_pragmas_se_aplican(monkeypatch, tmp_path):
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1          # NORMAL
     assert conn.execute("PRAGMA cache_size").fetchone()[0] == -16384
     conn.close()
+
+
+def test_warmup_activo_solo_en_pi(monkeypatch):
+    monkeypatch.setenv("DATA_BASKET_PROFILE", "default")
+    assert perf.settings()["warmup"] is False
+    monkeypatch.setenv("DATA_BASKET_PROFILE", "pi")
+    assert perf.settings()["warmup"] is True
+    monkeypatch.setenv("WARMUP", "0")
+    assert perf.settings()["warmup"] is False
+
+
+def test_warm_models_llama_a_cada_modelo_y_tolera_fallos(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    llamadas = []
+
+    def shot(**kw):
+        llamadas.append(("tiro", kw["model_name"]))
+
+    def game(conn, **kw):
+        llamadas.append(("partido", kw["model_name"], kw["margin_model_name"], kw["home_team_id"]))
+        if kw["home_team_id"] == "t1":  # el primer par "no tiene partidos"
+            raise RuntimeError("sin partidos")
+
+    fake = types.SimpleNamespace(
+        available_shot_models=lambda: ["logreg", "xgboost"],
+        available_models=lambda: ["logreg", "xgboost"],
+        available_margin_models=lambda: ["ridge", "xgboost"],
+        shot_make_probability=shot,
+        predict_game=game,
+    )
+    monkeypatch.setitem(sys.modules, "src.predict", fake)
+
+    def open_conn():
+        c = sqlite3.connect(str(tmp_path / "w.db"))
+        c.execute("CREATE TABLE IF NOT EXISTS teams(source TEXT, team_id TEXT)")
+        if not c.execute("SELECT 1 FROM teams").fetchone():
+            c.executemany("INSERT INTO teams VALUES (?,?)",
+                          [("nba", "t1"), ("nba", "t2"), ("nba", "t3"), ("nba", "t4")])
+            c.commit()
+        return c
+
+    from src import warmup
+    res = warmup.warm_models(open_conn, log=lambda *_: None)
+
+    assert ("tiro", "logreg") in llamadas and ("tiro", "xgboost") in llamadas
+    # el par t1-t2 falla, el calentamiento sigue con t3-t4 y recorre todas las combinaciones
+    partidos_ok = [l for l in llamadas if l[0] == "partido" and l[3] == "t3"]
+    assert {(l[1], l[2]) for l in partidos_ok} == {("logreg", "ridge"), ("xgboost", "xgboost")}
+    assert any(not ok for _, ok, _ in res)  # el fallo quedo registrado, sin excepcion

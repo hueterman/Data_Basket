@@ -366,11 +366,22 @@ if __name__ == "__main__":
     # enseñar el API). Por defecto (sin PRODUCTION=1) el comportamiento
     # NO cambia -- sigue siendo el servidor de desarrollo con debug=True,
     # para no romper el flujo de trabajo local habitual.
+    from src import perf
+
+    # Calentamiento en segundo plano (perfil "pi" o WARMUP=1, ver src/warmup.py):
+    # paga la compilacion de SHAP/numba una vez al arrancar, no el primer usuario.
+    if perf.settings()["warmup"]:
+        import threading
+
+        from src.warmup import warm_models
+
+        threading.Thread(target=lambda: warm_models(get_connection), name="warmup",
+                         daemon=True).start()
+
     if os.environ.get("PRODUCTION") == "1":
         from waitress import serve
         print(f"Sirviendo con waitress (modo produccion/demo, SIN depurador) en "
               f"http://0.0.0.0:{port}")
-        from src import perf
         serve(app, host="0.0.0.0", port=port, threads=perf.settings()["waitress_threads"])
     else:
         app.run(debug=True, port=port)

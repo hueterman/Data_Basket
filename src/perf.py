@@ -16,6 +16,7 @@ Cada valor se puede forzar por separado con su propia variable de entorno
     WAITRESS_THREADS     hilos del servidor waitress
     SHOT_CACHE           1 | 0  -> cache en disco de los PNG de shot charts
     MODEL_NTHREAD        hilos de XGBoost/BLAS al predecir (0 = no tocar)
+    WARMUP               1 | 0  -> calentar los modelos (SHAP/numba) al arrancar la API
 """
 from __future__ import annotations
 
@@ -41,6 +42,7 @@ _PROFILES: dict[str, dict] = {
         "waitress_threads": 4,
         "shot_cache": False,
         "model_nthread": 0,
+        "warmup": False,
     },
     "pi": {
         "db_cache_kb": 16384,   # 16 MiB por conexion (la de SQLite por defecto es ~2 MiB)
@@ -49,6 +51,7 @@ _PROFILES: dict[str, dict] = {
         "waitress_threads": 4,  # 4 nucleos; la ingesta corre en otro proceso
         "shot_cache": True,     # matplotlib en la Pi es lo mas caro por peticion
         "model_nthread": 2,     # deja libres los otros 2 nucleos a la ingesta
+        "warmup": True,         # paga la compilacion de SHAP una vez, al arrancar
     },
 }
 
@@ -84,6 +87,9 @@ def settings() -> dict:
     if shot is not None and shot.strip() in {"0", "1"}:
         base["shot_cache"] = shot.strip() == "1"
     base["model_nthread"] = max(0, _env_int("MODEL_NTHREAD", base["model_nthread"]))
+    warm = os.environ.get("WARMUP")
+    if warm is not None and warm.strip() in {"0", "1"}:
+        base["warmup"] = warm.strip() == "1"
     return base
 
 
