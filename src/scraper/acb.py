@@ -214,6 +214,7 @@ from __future__ import annotations
 import io
 import logging
 import re
+import time
 
 import pandas as pd
 import requests
@@ -365,6 +366,18 @@ def _clean_player_cell(raw: object) -> str:
     return _JERSEY_PREFIX_RE.sub("", str(raw).strip()).strip()
 
 
+# Reintentos HTTP (AÑADIDO 2026-10-13): acb.com devolvio un 502 Bad Gateway
+# puntual en plena ingesta semanal y, sin reintentos, un solo fallo transitorio
+# tumbaba la fuente ENTERA (volvio a funcionar al repetir minutos despues). Se
+# reintenta SOLO lo que suele ser transitorio -- errores de conexion/timeout y
+# 429/500/502/503/504 -- con espera creciente (2 s, 4 s, 8 s). Un 404 u otro
+# 4xx NO se reintenta: es un fallo real, no un hipo del servidor.
+_MAX_RETRIES = 3
+_RETRY_BACKOFF_BASE = 2.0
+_RETRY_MAX_DELAY = 30.0
+_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
 class AcbSource:
     source = "acb"
 
@@ -374,10 +387,45 @@ class AcbSource:
 
     # -- infraestructura HTTP ---------------------------------------------
 
+    @staticmethod
+    def _retry_delay(attempt: int, response=None) -> float:
+        """Espera antes del reintento numero `attempt+1`: exponencial, o el
+        `Retry-After` del servidor si lo manda en segundos (con tope)."""
+        delay = _RETRY_BACKOFF_BASE * (2 ** attempt)
+        if response is not None:
+            retry_after = response.headers.get("Retry-After", "")
+            if retry_after.strip().isdigit():
+                delay = max(delay, float(retry_after))
+        return min(delay, _RETRY_MAX_DELAY)
+
+    def _get(self, url: str) -> requests.Response:
+        """GET con reintentos (ver _MAX_RETRIES). Lanza requests.RequestException
+        si se agotan o si el error no es transitorio -- los llamadores ya lo
+        envuelven en AcbSourceError."""
+        for attempt in range(_MAX_RETRIES + 1):
+            try:
+                response = self._session.get(url, timeout=_DEFAULT_TIMEOUT)
+            except (requests.ConnectionError, requests.Timeout) as exc:
+                if attempt >= _MAX_RETRIES:
+                    raise
+                delay = self._retry_delay(attempt)
+                logger.warning("ACB: %s (%s) -- reintento %d/%d en %.0fs",
+                               url, type(exc).__name__, attempt + 1, _MAX_RETRIES, delay)
+                time.sleep(delay)
+                continue
+            if response.status_code in _RETRY_STATUS and attempt < _MAX_RETRIES:
+                delay = self._retry_delay(attempt, response)
+                logger.warning("ACB: %s devolvio HTTP %d -- reintento %d/%d en %.0fs",
+                               url, response.status_code, attempt + 1, _MAX_RETRIES, delay)
+                time.sleep(delay)
+                continue
+            response.raise_for_status()
+            return response
+        raise AssertionError("inalcanzable")  # el bucle siempre retorna o lanza
+
     def _get_soup(self, url: str, context: str) -> BeautifulSoup:
         try:
-            response = self._session.get(url, timeout=_DEFAULT_TIMEOUT)
-            response.raise_for_status()
+            response = self._get(url)
         except requests.RequestException as exc:
             raise AcbSourceError(f"Fallo pidiendo {context}: {exc}") from exc
         return BeautifulSoup(response.text, "html.parser")
@@ -645,8 +693,7 @@ class AcbSource:
         slug1, slug2, _numero = self._split_game_id(game_id)
         url = f"{_LIVE_BASE}/partidos/{game_id}/estadisticas"
         try:
-            response = self._session.get(url, timeout=_DEFAULT_TIMEOUT)
-            response.raise_for_status()
+            response = self._get(url)
             tables = pd.read_html(io.StringIO(response.text))
         except requests.RequestException as exc:
             raise AcbSourceError(f"Fallo pidiendo estadisticas de game_id={game_id!r}: {exc}") from exc
