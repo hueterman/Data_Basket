@@ -1,0 +1,17 @@
+# Ingesta semanal de temporadas en curso. La lanza databasket-ingest.timer.
+# Instalacion: ver deploy/raspberry/README.md
+[Unit]
+Description=Data Basket - ingesta semanal de temporadas en curso
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=hueterman
+WorkingDirectory=/home/hueterman/Data_Basket
+ExecStart=/bin/bash /home/hueterman/Data_Basket/scripts/weekly_ingest_current_seasons.sh
+# Que no moleste a la API/interfaz mientras scrapea (CPU y disco con prioridad baja)
+Nice=10
+IOSchedulingClass=idle
+# WNBA/NBA con --no-cache pueden tardar bastante en una Pi
+TimeoutStartSec=6h

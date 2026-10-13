@@ -1,0 +1,13 @@
+[Unit]
+Description=Data Basket UI
+After=network.target
+
+[Service]
+User=hueterman
+WorkingDirectory=/home/hueterman/Data_Basket
+Environment=PRODUCTION=1 PORT=5050 HOST=0.0.0.0
+ExecStart=/home/hueterman/Data_Basket/.venv/bin/python app/app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
