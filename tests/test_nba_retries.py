@@ -7,6 +7,7 @@ from src.scraper import nba as nba_mod
 @pytest.fixture(autouse=True)
 def _reset(monkeypatch):
     nba_mod._fail_streak = 0
+    nba_mod._cooldowns_without_success = 0
     sleeps = []
     monkeypatch.setattr(nba_mod.time, "sleep", lambda s: sleeps.append(s))
     return sleeps
@@ -61,3 +62,23 @@ def test_get_boxscore_envuelve_el_error_final(monkeypatch, _reset):
     monkeypatch.setattr(nba_mod.boxscoretraditionalv3, "BoxScoreTraditionalV3", boom)
     with pytest.raises(nba_mod.NbaSourceError):
         nba_mod.NbaSource("2018-19").get_boxscore("0021800917")
+
+
+def test_para_con_rate_limited_si_las_pausas_no_sirven(_reset):
+    from src.scraper.sports_reference import RateLimitedError
+    f = _flaky(10**6)
+    pausas = 0
+    with pytest.raises(RateLimitedError):
+        for _ in range(100):                      # un partido tras otro, todos fallan
+            try:
+                nba_mod._request_with_retry(f, "x")
+            except TimeoutError:
+                pass
+    assert _reset.count(nba_mod._COOLDOWN_SECONDS) == nba_mod._MAX_COOLDOWNS
+
+
+def test_un_exito_reinicia_el_contador_de_pausas(_reset):
+    nba_mod._fail_streak = nba_mod._FAIL_STREAK_LIMIT
+    nba_mod._cooldowns_without_success = nba_mod._MAX_COOLDOWNS - 1
+    assert nba_mod._request_with_retry(_flaky(0), "x") == "ok"
+    assert nba_mod._cooldowns_without_success == 0

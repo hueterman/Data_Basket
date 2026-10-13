@@ -73,6 +73,7 @@ from nba_api.stats.endpoints import (
     shotchartdetail,
 )
 
+from src.scraper.sports_reference import RateLimitedError
 from src.scraper.base import (
     BoxscoreData,
     GameRef,
@@ -119,14 +120,29 @@ _RETRY_BACKOFF_BASE = 5.0
 _RETRY_MAX_DELAY = 60.0
 _FAIL_STREAK_LIMIT = 5
 _COOLDOWN_SECONDS = 120.0
-_fail_streak = 0  # fallos definitivos seguidos (estado del modulo)
+# Si tras _MAX_COOLDOWNS pausas largas seguidas no ha funcionado NI UNA peticion,
+# no es un pico de trafico sino un bloqueo duradero: se para la ingesta con
+# RateLimitedError (el pipeline guarda lo ya descargado y anota el fallo) en
+# vez de seguir horas con timeouts. Se reanuda mas tarde y la cache salta lo hecho.
+_MAX_COOLDOWNS = 2
+_fail_streak = 0              # fallos definitivos seguidos (estado del modulo)
+_cooldowns_without_success = 0
 
 
 def _request_with_retry(make_request, what: str):
     """Ejecuta `make_request()` con reintentos/enfriamiento (ver arriba).
     Relanza la ultima excepcion si se agotan los intentos."""
-    global _fail_streak
+    global _fail_streak, _cooldowns_without_success
     if _fail_streak >= _FAIL_STREAK_LIMIT:
+        if _cooldowns_without_success >= _MAX_COOLDOWNS:
+            _fail_streak = 0
+            _cooldowns_without_success = 0
+            raise RateLimitedError(
+                f"stats.nba.com no responde tras {_MAX_COOLDOWNS} pausas largas "
+                f"seguidas ({what}): posible bloqueo temporal de la IP. Se para "
+                f"la ingesta; lo descargado queda guardado. Reintenta en unas horas."
+            )
+        _cooldowns_without_success += 1
         logger.warning(
             "%d fallos seguidos pidiendo a stats.nba.com (posible limite de "
             "ritmo): pausa de %.0f s antes de seguir.", _fail_streak, _COOLDOWN_SECONDS,
@@ -139,6 +155,7 @@ def _request_with_retry(make_request, what: str):
         try:
             result = make_request()
             _fail_streak = 0
+            _cooldowns_without_success = 0
             return result
         except Exception as exc:  # nba_api lanza requests.* / JSONDecodeError / ...
             last_exc = exc
