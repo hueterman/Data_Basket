@@ -1,0 +1,11 @@
+[Unit]
+Description=Data_Basket - copia de seguridad diaria de la base de datos
+
+[Timer]
+# 06:30 hora local: despues de la ingesta del lunes (04:00), que tarda unas horas como mucho.
+OnCalendar=*-*-* 06:30:00
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

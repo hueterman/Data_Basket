@@ -1,0 +1,11 @@
+[Unit]
+Description=Data_Basket - copia de seguridad de basketball.db
+
+[Service]
+Type=oneshot
+User=hueterman
+WorkingDirectory=/home/hueterman/Data_Basket
+ExecStart=/home/hueterman/Data_Basket/.venv/bin/python scripts/backup_db.py
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=1h
