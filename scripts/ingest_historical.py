@@ -262,7 +262,7 @@ def parse_args() -> dict:
         if arg == "--sources":
             args["sources"] = argv[i + 1].split(","); i += 2
         elif arg == "--seasons":
-            args["seasons"] = argv[i + 1].split(","); i += 2
+            args["seasons"] = [x.strip() for x in argv[i + 1].split(",") if x.strip()]; i += 2
         elif arg == "--no-players":
             args["fetch_players"] = False; i += 1
         elif arg == "--limit":

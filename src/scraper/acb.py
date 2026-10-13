@@ -302,7 +302,17 @@ def _edition_id_from_season(season: str) -> int:
             f"año_inicio_temporada - {_EDITION_ID_BASE_YEAR}, ver "
             f"docstring del modulo)."
         )
-    return int(match.group("start")) - _EDITION_ID_BASE_YEAR
+    start = int(match.group("start"))
+    expected_end = (start + 1) % 100
+    if int(match.group("end")) != expected_end:
+        # Una etiqueta como "2011-10" calcula bien el editionId (usa solo el
+        # año de inicio) pero etiqueta TODOS los partidos con una temporada
+        # que no existe. Mejor parar que guardar datos con la season mal.
+        raise AcbSourceError(
+            f"season={season!r} no es una temporada valida: tras "
+            f"{start} deberia ir '{start}-{expected_end:02d}'."
+        )
+    return start - _EDITION_ID_BASE_YEAR
 
 
 def _round_number_from_title(title: str) -> int | None:

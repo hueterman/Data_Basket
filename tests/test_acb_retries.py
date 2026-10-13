@@ -87,3 +87,11 @@ def test_boxscore_tambien_reintenta(source):
     with pytest.raises(AcbSourceError):
         source.get_boxscore("barca-vs-real-madrid-1")
     assert source._session.calls == 2
+
+
+def test_season_con_fin_incoherente_se_rechaza():
+    from src.scraper import acb
+    assert acb._edition_id_from_season("2011-12") == 76
+    assert acb._edition_id_from_season("1999-00") == 64
+    with pytest.raises(acb.AcbSourceError):
+        acb._edition_id_from_season("2011-10")
