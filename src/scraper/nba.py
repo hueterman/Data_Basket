@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 from nba_api.stats.static import teams as nba_static_teams
 from nba_api.stats.endpoints import (
@@ -102,6 +103,52 @@ logger = logging.getLogger(__name__)
 # proyecto contra los cambios de Akamai.
 
 _DEFAULT_TIMEOUT = 30  # segundos, igual que el valor por defecto de nba_api
+
+# Peticiones POR PARTIDO (boxscore y shot chart). stats.nba.com limita el
+# ritmo de las conexiones desatendidas: tras ~1000 peticiones seguidas
+# empiezan bloques enteros de timeouts (visto en la Pi: 111 de 1230 partidos
+# de 2018-19, ~55 min perdidos esperando 30 s por cada uno). Estrategia:
+#  - timeout mas corto por partido (un boxscore sano responde en segundos);
+#  - si el servidor iba bien, se reintenta con espera creciente;
+#  - si ya viene una racha de fallos NO se reintenta (cada intento cuesta un
+#    timeout entero) y, al llegar a _FAIL_STREAK_LIMIT seguidos, se hace una
+#    pausa larga para dejar que se levante el limite antes de seguir.
+_GAME_TIMEOUT = 20
+_MAX_RETRIES = 2
+_RETRY_BACKOFF_BASE = 5.0
+_RETRY_MAX_DELAY = 60.0
+_FAIL_STREAK_LIMIT = 5
+_COOLDOWN_SECONDS = 120.0
+_fail_streak = 0  # fallos definitivos seguidos (estado del modulo)
+
+
+def _request_with_retry(make_request, what: str):
+    """Ejecuta `make_request()` con reintentos/enfriamiento (ver arriba).
+    Relanza la ultima excepcion si se agotan los intentos."""
+    global _fail_streak
+    if _fail_streak >= _FAIL_STREAK_LIMIT:
+        logger.warning(
+            "%d fallos seguidos pidiendo a stats.nba.com (posible limite de "
+            "ritmo): pausa de %.0f s antes de seguir.", _fail_streak, _COOLDOWN_SECONDS,
+        )
+        time.sleep(_COOLDOWN_SECONDS)
+        _fail_streak = 0
+    retries = _MAX_RETRIES if _fail_streak == 0 else 0
+    last_exc: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            result = make_request()
+            _fail_streak = 0
+            return result
+        except Exception as exc:  # nba_api lanza requests.* / JSONDecodeError / ...
+            last_exc = exc
+            if attempt < retries:
+                delay = min(_RETRY_BACKOFF_BASE * (2 ** attempt), _RETRY_MAX_DELAY)
+                logger.info("%s: intento %d fallo (%s); reintento en %.0f s.",
+                            what, attempt + 1, exc, delay)
+                time.sleep(delay)
+    _fail_streak += 1
+    raise last_exc  # type: ignore[misc]
 
 _MINUTES_ISO_RE = re.compile(r"PT(\d+)M(\d+(?:\.\d+)?)S")
 
@@ -332,10 +379,13 @@ class NbaSource:
         """Usa BoxScoreTraditionalV3 (V2 esta deprecado desde 2025-26,
         ver aviso al inicio del modulo)."""
         try:
-            box = boxscoretraditionalv3.BoxScoreTraditionalV3(
-                game_id=game_id,
-                headers=None,
-                timeout=_DEFAULT_TIMEOUT,
+            box = _request_with_retry(
+                lambda: boxscoretraditionalv3.BoxScoreTraditionalV3(
+                    game_id=game_id,
+                    headers=None,
+                    timeout=_GAME_TIMEOUT,
+                ),
+                f"boxscore {game_id}",
             )
             team_df = box.team_stats.get_data_frame()
             player_df = box.player_stats.get_data_frame()
@@ -403,14 +453,17 @@ class NbaSource:
         jugador.
         """
         try:
-            chart = shotchartdetail.ShotChartDetail(
-                team_id=0,
-                player_id=0,
-                game_id_nullable=game_id,
-                context_measure_simple="FGA",
-                season_nullable=self.season,
-                headers=None,
-                timeout=_DEFAULT_TIMEOUT,
+            chart = _request_with_retry(
+                lambda: shotchartdetail.ShotChartDetail(
+                    team_id=0,
+                    player_id=0,
+                    game_id_nullable=game_id,
+                    context_measure_simple="FGA",
+                    season_nullable=self.season,
+                    headers=None,
+                    timeout=_GAME_TIMEOUT,
+                ),
+                f"shot chart {game_id}",
             )
             df = chart.shot_chart_detail.get_data_frame()
         except Exception as exc:
