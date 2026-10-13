@@ -22,8 +22,8 @@ seaborn
 mplbasketball
 
 # --- Modelado ---
-scikit-learn
-xgboost
+scikit-learn==1.7.2  # = version con la que se guardaron los .joblib de models/ (evita InconsistentVersionWarning)
+xgboost==3.2.0  # idem: los modelos xgboost se serializaron con 3.2.0
 joblib
 shap  # explicabilidad (SHAP) en /predict y /predict_shot, ver src/predict.py
 
