@@ -47,3 +47,12 @@ def test_cache_antigua_sin_periodo_sigue_cargando(tmp_path):
     assert shot.period is None
     raw_cache.save_shots("nba", "2019-20", "g1", [Shot("g1", "1", "2", 0.0, 1.0, True, "2", 4)], tmp_path)
     assert raw_cache.load_shots("nba", "2019-20", "g1", tmp_path)[0].period == 4
+
+
+def test_wnba_acepta_posiciones_negativas_en_el_borde():
+    from src.scraper.wnba import _SHOT_POS_RE
+    m = _SHOT_POS_RE.search("top:57px;left:-1px;")
+    assert (m.group(1), m.group(2)) == ("57", "-1")
+    m = _SHOT_POS_RE.search("top:-1px; left:242px;")
+    assert (m.group(1), m.group(2)) == ("-1", "242")
+    assert _SHOT_POS_RE.search("top:57.5px;left:10px;")

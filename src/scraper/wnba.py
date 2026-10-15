@@ -109,7 +109,7 @@ _BASE = "https://www.basketball-reference.com"
 _TEAM_HREF_RE = re.compile(r"/wnba/teams/([A-Z]+)/")
 _PLAYER_HREF_RE = re.compile(r"/wnba/players/[a-z]/([a-z0-9]+)\.html")
 _BOXSCORE_HREF_RE = re.compile(r"^/wnba/boxscores/(?P<gid>\d{9}[A-Z]{3})\.html$")
-_SHOT_POS_RE = re.compile(r"top:\s*([\d.]+)px;\s*left:\s*([\d.]+)px")
+_SHOT_POS_RE = re.compile(r"top:\s*(-?[\d.]+)px;\s*left:\s*(-?[\d.]+)px")
 _SHOT_TYPE_RE = re.compile(r"(\d)-pointer", re.IGNORECASE)
 
 

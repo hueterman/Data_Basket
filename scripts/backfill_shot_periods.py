@@ -46,14 +46,16 @@ def build_source(name: str, season: str):
     raise ValueError(f"fuente sin periodo de tiro: {name!r}")
 
 
-def pending(conn, source: str, seasons: list[str] | None) -> dict[str, list[str]]:
-    """{temporada: [game_id, ...]} con tiros guardados y alguno sin periodo."""
+def pending(conn, source: str, seasons: list[str] | None, include_all: bool = False) -> dict[str, list[str]]:
+    """{temporada: [game_id, ...]} con tiros guardados y alguno sin periodo
+    (o todos los que tengan tiros, con include_all)."""
+    missing = "" if include_all else "AND s.period IS NULL"
     rows = conn.execute(
-        """
+        f"""
         SELECT g.season, g.game_id FROM games g
         WHERE g.source = ?
           AND EXISTS (SELECT 1 FROM shots s WHERE s.source = g.source AND s.game_id = g.game_id
-                      AND s.period IS NULL)
+                      {missing})
         ORDER BY g.season, g.date, g.game_id
         """,
         (source,),
@@ -74,6 +76,7 @@ def main(argv=None) -> int:
     ap.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     ap.add_argument("--limit", type=int, default=0, help="maximo de partidos a procesar en esta ejecucion")
     ap.add_argument("--sleep", type=float, default=0.0, help="segundos de pausa extra entre partidos")
+    ap.add_argument("--all", action="store_true", help="rehacer tambien los partidos que ya tienen periodo")
     ap.add_argument("--apply", action="store_true", help="sin esto solo cuenta lo pendiente")
     args = ap.parse_args(argv)
 
@@ -88,7 +91,7 @@ def main(argv=None) -> int:
     done = failed = 0
     try:
         for source in sources:
-            todo = pending(conn, source, seasons)
+            todo = pending(conn, source, seasons, args.all)
             n = sum(len(v) for v in todo.values())
             print(f"[{source}] {n} partidos con tiros sin periodo en {len(todo)} temporada(s)")
             if not args.apply:
