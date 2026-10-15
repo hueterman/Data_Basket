@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 GAME_COLS = ("source, game_id, season, round, date, home_team_id, away_team_id, "
              "home_score, away_score, played")
-SHOT_COLS = "source, game_id, player_id, team_id, loc_x, loc_y, made, shot_type"
+SHOT_COLS = "source, game_id, player_id, team_id, loc_x, loc_y, made, shot_type"  # + period si ambas BD lo tienen
 
 
 def _cols(conn, table, schema="main"):
@@ -75,8 +75,11 @@ def merge(conn: sqlite3.Connection) -> dict[str, int]:
             f"INSERT INTO main.{t} ({cols}) SELECT {', '.join('o.'+c for c in _cols(conn, t))} "
             f"FROM other.{t} o JOIN _todo x ON x.source=o.source AND x.game_id=o.game_id"
         ).rowcount
+    shot_cols = SHOT_COLS.split(", ")
+    if "period" in _cols(conn, "shots") and "period" in _cols(conn, "shots", "other"):
+        shot_cols.append("period")
     res["shots"] = conn.execute(
-        f"INSERT INTO main.shots ({SHOT_COLS}) SELECT {', '.join('o.'+c for c in SHOT_COLS.split(', '))} "
+        f"INSERT INTO main.shots ({', '.join(shot_cols)}) SELECT {', '.join('o.'+c for c in shot_cols)} "
         f"FROM other.shots o JOIN _todo x ON x.source=o.source AND x.game_id=o.game_id"
     ).rowcount
     for t in ("teams", "players", "coaches", "sources"):

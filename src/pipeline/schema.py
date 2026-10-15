@@ -126,6 +126,7 @@ DDL_STATEMENTS: tuple[str, ...] = (
         loc_y REAL NOT NULL,
         made INTEGER NOT NULL,
         shot_type TEXT,
+        period INTEGER,
         FOREIGN KEY (source, game_id) REFERENCES games (source, game_id)
     )
     """,
@@ -290,4 +291,9 @@ def init_db(conn) -> None:
     cur = conn.cursor()
     for statement in DDL_STATEMENTS:
         cur.execute(statement)
+    # Migracion: las BD creadas antes de guardar el periodo no tienen la columna
+    # (CREATE TABLE IF NOT EXISTS no la anade). Las filas antiguas quedan en NULL.
+    cols = [r[1] for r in cur.execute("PRAGMA table_info(shots)")]
+    if "period" not in cols:
+        cur.execute("ALTER TABLE shots ADD COLUMN period INTEGER")
     conn.commit()

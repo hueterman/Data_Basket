@@ -400,12 +400,124 @@ def game_detail(source, game_id):
         "SELECT COUNT(*) FROM shots WHERE source=? AND game_id=?", (source, game_id)
     ).fetchone()[0]
 
+    n_period_shots = conn.execute(
+        "SELECT COUNT(*) FROM shots WHERE source=? AND game_id=? AND period IS NOT NULL",
+        (source, game_id),
+    ).fetchone()[0]
+
     return render_template(
         "game_detail.html",
         game=game, team_stats=team_stats, player_stats=player_stats,
         team_names=team_names, n_shots=n_shots, attribution=ATTRIBUTION.get(source),
         has_shot_chart=(source in SHOT_CHART_SOURCES and n_shots > 0),
+        has_period_chart=(source in SHOT_CHART_SOURCES and n_period_shots > 0),
+        n_period_shots=n_period_shots,
     )
+
+
+def _period_title(period: int) -> str:
+    return f"{period}º cuarto" if period <= 4 else ("Prórroga" if period == 5 else f"Prórroga {period - 4}")
+
+
+@app.route("/partidos/<source>/<game_id>/tiros_periodos.png")
+def shot_chart_periods(source, game_id):
+    """Tiros por periodo: una fila por cuarto (y prorroga si la hubo), con el local a
+    la izquierda y el visitante a la derecha, para comparar los dos equipos."""
+    if source not in SHOT_CHART_SOURCES:
+        abort(404, f"{source} no tiene coordenadas de tiro calibradas todavia")
+
+    conn = db()
+    shots = conn.execute(
+        "SELECT team_id, loc_x, loc_y, made, period FROM shots "
+        "WHERE source=? AND game_id=? AND period IS NOT NULL",
+        (source, game_id),
+    ).fetchall()
+    game = conn.execute(
+        "SELECT home_team_id, away_team_id FROM games WHERE source=? AND game_id=?",
+        (source, game_id),
+    ).fetchone()
+    if not shots or game is None:
+        abort(404, "Este partido no tiene tiros con periodo guardado")
+
+    sides = [str(game["home_team_id"]), str(game["away_team_id"])]
+    team_label = {}
+    for tid in sides:
+        row = conn.execute(
+            "SELECT name FROM teams WHERE source=? AND team_id=?", (source, tid)
+        ).fetchone()
+        team_label[tid] = row["name"] if row else tid
+
+    # Periodos a dibujar: siempre los 4 cuartos (comparables aunque un equipo no tire
+    # en uno) y las prorrogas que hayan existido.
+    top = max(int(s["period"]) for s in shots)
+    periods = list(range(1, max(4, top) + 1))
+
+    from src import perf
+    cache_file = None
+    if perf.settings()["shot_cache"]:
+        import hashlib
+        key = hashlib.sha1(
+            f"per1|{source}|{game_id}|{len(shots)}|{sum(1 for s in shots if s['made'])}|{top}".encode()
+        ).hexdigest()
+        cache_file = perf.SHOT_CACHE_DIR / f"{key}.png"
+        try:
+            if cache_file.exists():
+                return Response(cache_file.read_bytes(), mimetype="image/png")
+        except OSError:
+            cache_file = None
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    from src.features import SHOT_COORD_CALIBRATION
+    from src.viz import draw_court, draw_court_fiba
+
+    is_nba = source == "nba"
+    to_m = None if is_nba else SHOT_COORD_CALIBRATION[source]["to_meters"]
+    panel_w, panel_h = (4.4, 4.2) if is_nba else (4.4, 4.5)
+    fig, axes = plt.subplots(len(periods), 2, figsize=(panel_w * 2, panel_h * len(periods)), squeeze=False)
+
+    for r, period in enumerate(periods):
+        for c, tid in enumerate(sides):
+            ax = axes[r][c]
+            mine = [s for s in shots if str(s["team_id"]) == tid and int(s["period"]) == period]
+            pts = [(s["loc_x"], s["loc_y"]) if is_nba else to_m(s["loc_x"], s["loc_y"]) for s in mine]
+            (draw_court if is_nba else draw_court_fiba)(ax)
+            made = [bool(s["made"]) for s in mine]
+            ax.scatter([p[0] for p, m in zip(pts, made) if m], [p[1] for p, m in zip(pts, made) if m],
+                       c="#2a6fdb", s=14, alpha=0.75)
+            ax.scatter([p[0] for p, m in zip(pts, made) if not m], [p[1] for p, m in zip(pts, made) if not m],
+                       c="#d9822b", s=14, alpha=0.6, marker="x")
+            n_made = sum(made)
+            pct = f" ({100 * n_made / len(mine):.0f}%)" if mine else ""
+            ax.text(0.02, 0.98, f"{_period_title(period)} · {n_made}/{len(mine)}{pct}",
+                    transform=ax.transAxes, va="top", ha="left", fontsize=9,
+                    bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="#cccccc", alpha=0.92))
+            if r == 0:
+                ax.set_title(team_label[tid], fontsize=12, pad=8)
+
+    fig.legend(
+        handles=[Line2D([], [], marker="o", ls="", color="#2a6fdb", label="Anotado"),
+                 Line2D([], [], marker="x", ls="", color="#d9822b", label="Fallado")],
+        loc="upper center", ncol=2, fontsize=9, frameon=False, bbox_to_anchor=(0.5, 1.0),
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=90, bbox_inches="tight")
+    plt.close(fig)
+    png = buf.getvalue()
+    if cache_file is not None:
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache_file.with_suffix(".tmp")
+            tmp.write_bytes(png)
+            tmp.replace(cache_file)
+        except OSError:
+            pass
+    return Response(png, mimetype="image/png")
 
 
 @app.route("/partidos/<source>/<game_id>/tiros.png")

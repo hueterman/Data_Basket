@@ -250,6 +250,19 @@ _SHOT_ACTIONS = {"2FGA", "2FGM", "3FGA", "3FGM"}
 
 # "DNP" (did not play) es literal en el campo Minutes de Boxscore; el
 # resto llega como "MM:SS" (incluida la fila de totales, p. ej. "200:00").
+def period_from_minute(minute) -> int | None:
+    """Periodo (1-4 cuartos, 5+ prorrogas) a partir del minuto de juego de la API
+    de Euroliga (campo MINUTE: 1-10 = 1er cuarto ... 31-40 = 4o; 41-45 = 1a prorroga,
+    de 5 minutos cada una). None si el campo falta o no es un entero positivo."""
+    try:
+        m = int(str(minute).strip())
+    except (TypeError, ValueError):
+        return None
+    if m <= 0:
+        return None
+    return (m - 1) // 10 + 1 if m <= 40 else 5 + (m - 41) // 5
+
+
 _MINUTES_RE = re.compile(r"^(\d+):(\d{2})$")
 
 
@@ -610,6 +623,7 @@ class EuroleagueSource:
                     loc_y=float(row["COORD_Y"]),
                     made=str(row["ID_ACTION"]).endswith("FGM"),
                     shot_type="3" if str(row["ID_ACTION"]).startswith("3") else "2",
+                    period=period_from_minute(row.get("MINUTE")),
                 )
                 for row in rows
                 if row.get("ID_ACTION") in _SHOT_ACTIONS

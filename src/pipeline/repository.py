@@ -199,7 +199,7 @@ def replace_shots(
     )
     rows = [
         (source, s.game_id, s.player_id, s.team_id, s.loc_x, s.loc_y,
-         int(s.made), s.shot_type)
+         int(s.made), s.shot_type, s.period)
         for s in shots
     ]
     if rows:
@@ -207,8 +207,8 @@ def replace_shots(
             """
             INSERT INTO shots (
                 source, game_id, player_id, team_id,
-                loc_x, loc_y, made, shot_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                loc_x, loc_y, made, shot_type, period
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )

@@ -499,6 +499,7 @@ class NbaSource:
                     loc_y=float(row["LOC_Y"]),
                     made=bool(int(row["SHOT_MADE_FLAG"])),
                     shot_type="3" if "3PT" in str(row["SHOT_TYPE"]) else "2",
+                    period=int(row["PERIOD"]) if "PERIOD" in row and str(row["PERIOD"]).strip() not in ("", "nan") else None,
                 )
                 for _, row in df.iterrows()
             ]

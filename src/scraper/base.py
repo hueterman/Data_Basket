@@ -164,6 +164,9 @@ class Shot:
     loc_y: float
     made: bool
     shot_type: str | None = None  # "2", "3", "ft"...
+    # Periodo del partido: 1-4 cuartos, 5+ prorrogas. None = la fuente no lo da
+    # o el tiro se guardo antes de que se registrara (ver scripts/backfill_shot_periods.py).
+    period: int | None = None
 
 
 # ---------------------------------------------------------------------------

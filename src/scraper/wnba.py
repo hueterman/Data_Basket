@@ -492,6 +492,7 @@ class WnbaSource:
                         loc_y=loc_y,
                         made=made,
                         shot_type=shot_type,
+                        period=int(quarter) if quarter and quarter.isdigit() else None,
                     )
                 )
         return shots
