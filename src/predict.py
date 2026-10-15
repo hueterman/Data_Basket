@@ -38,6 +38,7 @@ import numpy as np
 import pandas as pd
 import shap
 
+from src.pipeline.clubs import apply_club_ids, club_of
 from src.features import (
     SHOT_COORD_CALIBRATION, SHOT_PRIOR_K_SHRINK, _classify_zone, build_team_game_features,
 )
@@ -396,11 +397,13 @@ def latest_team_features(conn: sqlite3.Connection, source: str, team_id: str) ->
         team_games["date"], utc=True, format="mixed", errors="coerce"
     )
     team_games = _add_season_carryover(team_games, ROLLING_STAT_COLS)
+    requested_team_id = team_id
+    team_id = club_of(conn, source, team_id)  # el id de esta temporada -> su club (ver clubs.py)
 
     this_team = team_games[team_games["team_id"] == team_id]
     if this_team.empty:
         raise PredictionError(
-            f"team_id={team_id!r} no tiene ningun partido jugado en "
+            f"team_id={requested_team_id!r} no tiene ningun partido jugado en "
             f"source={source!r} -- revisa el identificador (GET /teams?"
             f"source={source} lista los equipos validos)."
         )
@@ -455,6 +458,7 @@ def _current_elo_ratings(conn: sqlite3.Connection, source: str) -> dict[str, flo
     games_df = pd.read_sql(
         "SELECT source, game_id, home_team_id FROM games WHERE source = ?", conn, params=(source,)
     )
+    games_df = apply_club_ids(conn, games_df, cols=("home_team_id",))  # mismos ids que team_games
     team_games = team_games.merge(games_df, on=["source", "game_id"], how="left")
     team_games["is_home"] = team_games["team_id"] == team_games["home_team_id"]
     team_games["date_parsed"] = pd.to_datetime(
@@ -489,15 +493,15 @@ def predict_game(
     entrada no es valido, en vez de dejar que reviente una excepcion
     interna de pandas/sklearn sin explicacion.
     """
-    if home_team_id == away_team_id:
+    if club_of(conn, source, home_team_id) == club_of(conn, source, away_team_id):
         raise PredictionError("home_team_id y away_team_id no pueden ser el mismo equipo.")
 
     home = latest_team_features(conn, source, home_team_id)
     away = latest_team_features(conn, source, away_team_id)
 
     elo_ratings = _current_elo_ratings(conn, source)
-    home_elo = elo_ratings.get(home_team_id, ELO_BASE)
-    away_elo = elo_ratings.get(away_team_id, ELO_BASE)
+    home_elo = elo_ratings.get(club_of(conn, source, home_team_id), ELO_BASE)
+    away_elo = elo_ratings.get(club_of(conn, source, away_team_id), ELO_BASE)
 
     row = {f"diff_{col}_pre": home[col] - away[col] for col in ROLLING_STAT_COLS}
     row["diff_rest_days"] = float(home_rest_days) - float(away_rest_days)

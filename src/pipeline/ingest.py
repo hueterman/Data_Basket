@@ -50,6 +50,7 @@ from src.pipeline.repository import (
     upsert_sources,
     upsert_teams,
 )
+from src.pipeline import clubs
 from src.scraper.base import BasketballSource, BoxscoreNotPublished, GameRef
 
 try:
@@ -263,6 +264,12 @@ def ingest_source(
                 n_items=summary.n_boxscores_ok, n_errors=summary.n_boxscores_failed,
                 started_at=stage_start,
             )
+        # Agrupa los team_id de un mismo club entre temporadas (ver clubs.py). Nunca
+        # debe tumbar una ingesta ya hecha: si falla, se avisa y se sigue.
+        try:
+            clubs.rebuild(conn, [source])
+        except Exception as exc:  # noqa: BLE001
+            progress(f"[{source}] aviso: no se pudo actualizar team_club -> {exc}")
     finally:
         summary.elapsed_seconds = time.monotonic() - started
         if owns_conn:

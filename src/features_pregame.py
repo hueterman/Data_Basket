@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from src.features import build_team_game_features
+from src.pipeline.clubs import apply_club_ids
 
 # Metricas de las que se calcula una media PRE-partido (todas ya
 # validadas en features.py/notebook). "win" incluido a proposito: la
@@ -468,6 +469,7 @@ def build_pregame_game_dataset(
     games_df = pd.read_sql(
         "SELECT source, game_id, home_team_id, home_score, away_score FROM games", conn
     )
+    games_df = apply_club_ids(conn, games_df, cols=("home_team_id",))  # mismos ids que team_games
     pre = pre.merge(
         games_df.drop(columns=["home_score", "away_score"]), on=["source", "game_id"], how="left"
     )

@@ -1,0 +1,7 @@
+# Cambios de nombre de un mismo club (p. ej. por patrocinio) que NO se unen solos.
+# Columnas: source (o *), name (nombre antiguo, tal como sale en la lista de equipos),
+# same_as (nombre con el que debe unirse). Se compara sin tildes ni mayusculas.
+# Revisa candidatos con:  python scripts/build_clubs.py --suggest
+# Ejemplo (quita el # para activarlo):
+# feb,LIBERBANK OVIEDO BALONCESTO,ALIMERKA OVIEDO BALONCESTO
+source,name,same_as

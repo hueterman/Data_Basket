@@ -28,6 +28,7 @@ import sqlite3
 import numpy as np
 import pandas as pd
 
+from src.pipeline.clubs import apply_club_ids
 from src.scraper.base import TRAINABLE_SOURCES
 
 # ---------------------------------------------------------------------------
@@ -293,7 +294,10 @@ def build_team_game_features(
             "points_for", "points_against", "win",
             "poss", "team_minutes", "pace_40", "ortg", "drtg",
             "efg_pct", "tov_pct", "orb_pct", "ft_rate"]
-    return feats[cols].reset_index(drop=True)
+    # Mismo club = mismo identificador entre temporadas (ver src/pipeline/clubs.py):
+    # en FEB/Liga Femenina cada temporada trae un team_id nuevo. Va AL FINAL porque
+    # los cruces anteriores con team_stats/player_stats usan los ids reales de la fuente.
+    return apply_club_ids(conn, feats[cols].reset_index(drop=True))
 
 
 # ---------------------------------------------------------------------------

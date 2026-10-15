@@ -13,3 +13,5 @@ models/*.pkl
 .env
 logs/
 
+# Alias de clubes (cambios de nombre por patrocinio): SI va al repositorio
+!src/pipeline/club_aliases.csv
