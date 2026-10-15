@@ -49,6 +49,7 @@ from flask import Flask, Response, abort, flash, redirect, render_template, requ
 
 import jobs
 from src.pipeline.db import get_connection
+from src.pipeline.repository import team_seasons
 from src.scraper.base import ALL_SOURCES  # noqa: F401 (documenta el conjunto valido)
 
 app = Flask(__name__)
@@ -151,8 +152,19 @@ def teams():
     sql += " ORDER BY source, name"
     rows = conn.execute(sql, params).fetchall()
 
+    # En FEB/Liga Femenina el mismo club tiene un team_id distinto cada
+    # temporada: se muestra la temporada para distinguir las filas "repetidas".
+    seasons = team_seasons(conn)
+    season_text = {
+        (r["source"], str(r["team_id"])): ", ".join(seasons.get((r["source"], str(r["team_id"])), []))
+        for r in rows
+    }
+    rows = sorted(rows, key=lambda r: (
+        r["source"], r["name"], (seasons.get((r["source"], str(r["team_id"]))) or [""])[0]))
+
     return render_template(
         "teams.html", teams=rows, sources=_sources_list(conn), source=source, q=q,
+        season_text=season_text,
     )
 
 

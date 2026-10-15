@@ -242,3 +242,21 @@ def log_stage(
         ),
     )
     conn.commit()
+
+
+def team_seasons(conn: sqlite3.Connection) -> dict[tuple[str, str], list[str]]:
+    """{(source, team_id): [temporadas en las que juega]}, de una sola pasada.
+
+    Necesario porque en varias fuentes (FEB, Liga Femenina...) el mismo club
+    tiene un team_id DISTINTO cada temporada: sin la temporada, la lista de
+    equipos parece tener duplicados."""
+    out: dict[tuple[str, str], set[str]] = {}
+    rows = conn.execute(
+        """SELECT source, home_team_id, season FROM games
+           UNION SELECT source, away_team_id, season FROM games"""
+    )
+    for source, team_id, season in rows:
+        if season:
+            out.setdefault((source, str(team_id)), set()).add(season)
+    return {k: sorted(v) for k, v in out.items()}
+

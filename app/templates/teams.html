@@ -19,12 +19,13 @@
   {% if teams %}
   <div class="panel">
     <table>
-      <thead><tr><th>Fuente</th><th>Equipo</th></tr></thead>
+      <thead><tr><th>Fuente</th><th>Equipo</th><th>Temporadas</th></tr></thead>
       <tbody>
         {% for t in teams %}
         <tr>
           <td>{{ t.source }}</td>
           <td><a href="{{ url_for('team_detail', source=t.source, team_id=t.team_id) }}">{{ t.name }}</a></td>
+          <td>{{ season_text.get((t.source, t.team_id|string)) or "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
