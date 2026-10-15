@@ -73,7 +73,7 @@
   <h2>Tiros</h2>
   {% if has_shot_chart %}
     <div class="panel shot-chart">
-      <img src="{{ url_for('shot_chart', source=game.source, game_id=game.game_id) }}" alt="Shot chart del partido">
+      <img src="{{ url_for('shot_chart', source=game.source, game_id=game.game_id) }}" alt="Shot chart del partido, un equipo a cada lado" style="max-width:100%;height:auto;">
       <p class="subtitle" style="margin-top:8px;">{{ "{:,}".format(n_shots) }} tiros con coordenadas guardadas. Pista simplificada (no es el trazado oficial completo, ver src/viz/courts.py).</p>
     </div>
   {% elif n_shots > 0 %}

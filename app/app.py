@@ -421,11 +421,25 @@ def shot_chart(source, game_id):
 
     conn = db()
     shots = conn.execute(
-        "SELECT loc_x, loc_y, made FROM shots WHERE source=? AND game_id=?",
+        "SELECT team_id, loc_x, loc_y, made FROM shots WHERE source=? AND game_id=?",
         (source, game_id),
     ).fetchall()
     if not shots:
         abort(404, "Este partido no tiene tiros guardados")
+    game = conn.execute(
+        "SELECT home_team_id, away_team_id FROM games WHERE source=? AND game_id=?",
+        (source, game_id),
+    ).fetchone()
+    if game is None:
+        abort(404)
+    # Local a la izquierda, visitante a la derecha.
+    sides = [str(game["home_team_id"]), str(game["away_team_id"])]
+    team_label = {}
+    for tid in sides:
+        row = conn.execute(
+            "SELECT name FROM teams WHERE source=? AND team_id=?", (source, tid)
+        ).fetchone()
+        team_label[tid] = row["name"] if row else tid
 
     # Cache en disco (perfil "pi" o SHOT_CACHE=1, ver src/perf.py): generar el
     # PNG con matplotlib es lo mas caro de esta app en una Raspberry Pi. La
@@ -436,7 +450,7 @@ def shot_chart(source, game_id):
     if perf.settings()["shot_cache"]:
         import hashlib
         key = hashlib.sha1(
-            f"{source}|{game_id}|{len(shots)}|{sum(1 for s in shots if s['made'])}".encode()
+            f"v2|{source}|{game_id}|{len(shots)}|{sum(1 for s in shots if s['made'])}".encode()
         ).hexdigest()
         cache_file = perf.SHOT_CACHE_DIR / f"{key}.png"
         try:
@@ -452,30 +466,27 @@ def shot_chart(source, game_id):
     from src.features import SHOT_COORD_CALIBRATION
     from src.viz import draw_court, draw_court_fiba
 
-    if source == "nba":
-        # Unidad nativa (decimas de pie) -- sin convertir, igual que en
-        # el notebook (seccion 4).
-        xs = [s["loc_x"] for s in shots]
-        ys = [s["loc_y"] for s in shots]
-        fig, ax = plt.subplots(figsize=(6, 5.7))
-        draw_court(ax)
-    else:
-        to_m = SHOT_COORD_CALIBRATION[source]["to_meters"]
-        xy = [to_m(s["loc_x"], s["loc_y"]) for s in shots]
-        xs = [p[0] for p in xy]
-        ys = [p[1] for p in xy]
-        fig, ax = plt.subplots(figsize=(6, 6.2))
-        draw_court_fiba(ax)
+    is_nba = source == "nba"
+    to_m = None if is_nba else SHOT_COORD_CALIBRATION[source]["to_meters"]
+    size = (6, 5.7) if is_nba else (6, 6.2)
+    fig, axes = plt.subplots(1, 2, figsize=(size[0] * 2, size[1]))
 
-    made = [bool(s["made"]) for s in shots]
-    xs_made = [x for x, m in zip(xs, made) if m]
-    ys_made = [y for y, m in zip(ys, made) if m]
-    xs_miss = [x for x, m in zip(xs, made) if not m]
-    ys_miss = [y for y, m in zip(ys, made) if not m]
-
-    ax.scatter(xs_made, ys_made, c="#2a6fdb", s=18, alpha=0.75, label=f"Anotado ({len(xs_made)})")
-    ax.scatter(xs_miss, ys_miss, c="#d9822b", s=18, alpha=0.6, marker="x", label=f"Fallado ({len(xs_miss)})")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.04), ncol=2, fontsize=8, framealpha=0.9)
+    for ax, tid in zip(axes, sides):
+        # NBA en su unidad nativa (decimas de pie); el resto, a metros.
+        mine = [s for s in shots if str(s["team_id"]) == tid]
+        pts = [(s["loc_x"], s["loc_y"]) if is_nba else to_m(s["loc_x"], s["loc_y"]) for s in mine]
+        (draw_court if is_nba else draw_court_fiba)(ax)
+        made = [bool(s["made"]) for s in mine]
+        xm = [p[0] for p, m in zip(pts, made) if m]
+        ym = [p[1] for p, m in zip(pts, made) if m]
+        xf = [p[0] for p, m in zip(pts, made) if not m]
+        yf = [p[1] for p, m in zip(pts, made) if not m]
+        ax.scatter(xm, ym, c="#2a6fdb", s=18, alpha=0.75, label=f"Anotado ({len(xm)})")
+        ax.scatter(xf, yf, c="#d9822b", s=18, alpha=0.6, marker="x", label=f"Fallado ({len(xf)})")
+        pct = f" · {100 * len(xm) / len(mine):.0f}%" if mine else ""
+        ax.set_title(f"{team_label[tid]}{pct}", fontsize=11, pad=22)
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.04), ncol=2, fontsize=8, framealpha=0.9)
+    fig.tight_layout()
 
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
