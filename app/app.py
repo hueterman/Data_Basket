@@ -49,6 +49,7 @@ from flask import Flask, Response, abort, flash, redirect, render_template, requ
 
 import jobs
 from src.pipeline.db import get_connection
+from src.pipeline import clubs
 from src.pipeline.repository import team_seasons
 from src.scraper.base import ALL_SOURCES  # noqa: F401 (documenta el conjunto valido)
 
@@ -303,7 +304,14 @@ def games():
     conn = db()
     source = request.args.get("source") or ""
     season = request.args.get("season") or ""
+    team = request.args.get("team") or ""
     page = max(1, int(request.args.get("page", 1) or 1))
+
+    # Equipos del desplegable (solo con una fuente elegida: los ids son por fuente).
+    # Si el equipo pedido no es de esta fuente (p. ej. se cambio de fuente), se ignora.
+    team_choices = clubs.team_options(conn, source) if source else []
+    if team and team not in {k for k, _ in team_choices}:
+        team = ""
 
     where = "WHERE 1=1"
     params: list = []
@@ -313,6 +321,11 @@ def games():
     if season:
         where += " AND season = ?"
         params.append(season)
+    if team:
+        ids = clubs.team_ids_for(conn, source, team)
+        marks = ",".join("?" * len(ids))
+        where += f" AND (home_team_id IN ({marks}) OR away_team_id IN ({marks}))"
+        params += ids + ids
 
     total = conn.execute(f"SELECT COUNT(*) FROM games {where}", params).fetchone()[0]
     page, pages, offset = paginate(total, page)
@@ -352,7 +365,7 @@ def games():
     return render_template(
         "games.html",
         games=rows, sources=_sources_list(conn), source=source, season=season,
-        seasons=seasons, page=page, pages=pages, total=total, team_names=team_names,
+        team=team, team_choices=team_choices, seasons=seasons, page=page, pages=pages, total=total, team_names=team_names,
     )
 
 

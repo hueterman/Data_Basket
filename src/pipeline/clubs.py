@@ -165,3 +165,40 @@ def apply_club_ids(conn: sqlite3.Connection, df, cols=("team_id", "opp_id")):
         if col in out.columns:
             out[col] = [mapping.get((s, str(t)), t) for s, t in zip(out["source"], out[col])]
     return out
+
+
+def team_options(conn: sqlite3.Connection, source: str) -> list[tuple[str, str]]:
+    """[(clave, nombre)] de los equipos con partidos en `source`, para un desplegable.
+
+    La clave es el club_id si el equipo esta agrupado (asi un club con nombres/ids
+    distintos por temporada sale UNA sola vez) o su team_id. El nombre es el del id
+    con la temporada mas reciente. Orden alfabetico sin distinguir mayusculas."""
+    mapping = load_map(conn)
+    rows = conn.execute(
+        """
+        SELECT tid, MAX(season) FROM (
+            SELECT home_team_id AS tid, season FROM games WHERE source = ?
+            UNION ALL
+            SELECT away_team_id AS tid, season FROM games WHERE source = ?
+        ) WHERE tid IS NOT NULL GROUP BY tid
+        """,
+        (source, source),
+    ).fetchall()
+    names = {str(t): n for t, n in conn.execute("SELECT team_id, name FROM teams WHERE source = ?", (source,))}
+    best: dict[str, tuple[str, str]] = {}  # clave -> (ultima temporada, nombre)
+    for tid, last in rows:
+        tid = str(tid)
+        key = mapping.get((source, tid), tid)
+        cand = (last or "", names.get(tid) or tid)
+        if key not in best or cand[0] > best[key][0]:
+            best[key] = cand
+    return sorted(((k, v[1]) for k, v in best.items()), key=lambda kv: (kv[1].casefold(), kv[0]))
+
+
+def team_ids_for(conn: sqlite3.Connection, source: str, key: str) -> list[str]:
+    """team_id(s) de `source` que corresponden a la clave de `team_options`."""
+    mapping = load_map(conn)
+    ids = {str(r[0]) for r in conn.execute(
+        "SELECT home_team_id FROM games WHERE source = ? UNION SELECT away_team_id FROM games WHERE source = ?",
+        (source, source)) if r[0] is not None}
+    return sorted(t for t in ids if mapping.get((source, t), t) == key)

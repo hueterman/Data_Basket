@@ -18,9 +18,15 @@
         <option value="{{ s }}" {{ "selected" if s == season }}>{{ s }}</option>
       {% endfor %}
     </select>
+    <select name="team" onchange="this.form.submit()">
+      <option value="">Todos los equipos</option>
+      {% for key, name in team_choices %}
+        <option value="{{ key }}" {{ "selected" if key == team }}>{{ name }}</option>
+      {% endfor %}
+    </select>
     {% endif %}
     <button type="submit">Filtrar</button>
-    {% if source or season %}<a class="clear" href="{{ url_for('games') }}">limpiar</a>{% endif %}
+    {% if source or season or team %}<a class="clear" href="{{ url_for('games') }}">limpiar</a>{% endif %}
   </form>
 
   {% if games %}
@@ -49,9 +55,9 @@
   </div>
 
   <div class="pagination">
-    {% if page > 1 %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'season=' + season + '&' if season }}page={{ page - 1 }}">← anterior</a>{% endif %}
+    {% if page > 1 %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'season=' + season + '&' if season }}{{ 'team=' + (team|urlencode) + '&' if team }}page={{ page - 1 }}">← anterior</a>{% endif %}
     <span>página {{ page }} / {{ pages }}</span>
-    {% if page < pages %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'season=' + season + '&' if season }}page={{ page + 1 }}">siguiente →</a>{% endif %}
+    {% if page < pages %}<a href="?{{ 'source=' + source + '&' if source }}{{ 'season=' + season + '&' if season }}{{ 'team=' + (team|urlencode) + '&' if team }}page={{ page + 1 }}">siguiente →</a>{% endif %}
   </div>
   {% else %}
     <p class="empty">Sin resultados para este filtro.</p>
