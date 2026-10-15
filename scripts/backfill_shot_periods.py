@@ -8,7 +8,8 @@ Solo procesa los partidos con algun tiro sin periodo -> se puede cortar y reanud
 al repetir el comando continua donde se quedo. Si la fuente limita las peticiones
 (RateLimitedError) para en seco y avisa; vuelve a lanzarlo mas tarde.
 
-Fuentes con periodo disponible: nba, euroleague, eurocup, nextgen, wnba.
+Fuentes con periodo disponible: nba, euroleague, eurocup, nextgen, wnba y la familia FEB
+(feb, lfendesa, lfchallenge, lf2, segundafeb, tercerafeb, copaespaa).
 
 Uso (desde la raiz del proyecto, con el venv activo):
     python scripts/backfill_shot_periods.py --sources euroleague,eurocup          # cuenta y pide confirmar con --apply
@@ -30,7 +31,8 @@ from src.pipeline.db import DEFAULT_DB_PATH, get_connection  # noqa: E402
 from src.pipeline.repository import replace_shots  # noqa: E402
 from src.scraper.sports_reference import RateLimitedError  # noqa: E402
 
-SUPPORTED = ("nba", "euroleague", "eurocup", "nextgen", "wnba")
+FEB_FAMILY = ("feb", "lfendesa", "lfchallenge", "lf2", "segundafeb", "tercerafeb", "copaespaa")
+SUPPORTED = ("nba", "euroleague", "eurocup", "nextgen", "wnba") + FEB_FAMILY
 
 
 def build_source(name: str, season: str):
@@ -43,6 +45,9 @@ def build_source(name: str, season: str):
     if name == "wnba":
         from src.scraper.wnba import WnbaSource
         return WnbaSource(season=season)
+    if name in FEB_FAMILY:
+        from src.scraper.feb import FebSource
+        return FebSource(competition=name, year=season)
     raise ValueError(f"fuente sin periodo de tiro: {name!r}")
 
 

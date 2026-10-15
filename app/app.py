@@ -79,7 +79,12 @@ ATTRIBUTION = {
 # gráfico de tiro en la fuente original (ver base.py/cbb.py). nextgen
 # añadido el 2026-09-19 (mismo proveedor/calibracion que euroleague y
 # eurocup, confirmado en vivo).
-SHOT_CHART_SOURCES = {"nba", "euroleague", "eurocup", "wnba", "nextgen"}
+# Fuentes con coordenadas calibradas (SHOT_COORD_CALIBRATION en src/features.py). `ligau` tiene
+# tiros pero no calibracion todavia, por eso no esta.
+SHOT_CHART_SOURCES = {
+    "nba", "euroleague", "eurocup", "wnba", "nextgen",
+    "feb", "lfendesa", "lfchallenge", "lf2", "segundafeb", "tercerafeb", "copaespaa",
+}
 
 
 def db():

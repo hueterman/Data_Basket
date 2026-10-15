@@ -56,3 +56,10 @@ def test_wnba_acepta_posiciones_negativas_en_el_borde():
     m = _SHOT_POS_RE.search("top:-1px; left:242px;")
     assert (m.group(1), m.group(2)) == ("-1", "242")
     assert _SHOT_POS_RE.search("top:57.5px;left:10px;")
+
+
+def test_feb_period_from_quarter():
+    from src.scraper.feb import period_from_quarter
+    assert [period_from_quarter(q) for q in ("1", 2, " 4 ", "5")] == [1, 2, 4, 5]
+    assert period_from_quarter("") is None and period_from_quarter(None) is None
+    assert period_from_quarter("OT") is None and period_from_quarter("0") is None

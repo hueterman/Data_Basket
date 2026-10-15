@@ -606,6 +606,18 @@ _PLAYER_CODE_RE = re.compile(r"[?&]c=(\d+)")
 _JORNADA_HEADER_RE = re.compile(r"Jornada\s+(\d+)\s+(\d{1,2}/\d{1,2}/\d{4})")
 
 
+def period_from_quarter(quarter) -> int | None:
+    """Periodo (1-4 cuartos, 5+ prorrogas) a partir del campo `quarter` del ShotChart API
+    de FEB. Solo se aceptan enteros positivos; cualquier otra cosa (vacio, texto) da None
+    en vez de adivinar. Ojo: el formato de las prorrogas no esta confirmado en vivo --
+    si salen como texto quedaran en None (comprobar con SELECT period, COUNT(*) FROM shots)."""
+    try:
+        q = int(str(quarter).strip())
+    except (TypeError, ValueError):
+        return None
+    return q if q > 0 else None
+
+
 class FebSourceError(RuntimeError):
     """Fallo al extraer datos de baloncestoenvivo.feb.es, con contexto
     de que peticion concreta ha fallado y por que -- mismo estandar de
@@ -1430,6 +1442,7 @@ class FebSource:
                     loc_y=float(raw_shot.get("y") or 0),
                     made=(str(raw_shot.get("m")) == "1"),
                     shot_type="desconocido",
+                    period=period_from_quarter(raw_shot.get("quarter")),
                 )
             )
         return shots
