@@ -50,7 +50,7 @@ from src.pipeline.repository import (
     upsert_sources,
     upsert_teams,
 )
-from src.scraper.base import BasketballSource, GameRef
+from src.scraper.base import BasketballSource, BoxscoreNotPublished, GameRef
 
 try:
     from src.scraper.sports_reference import RateLimitedError
@@ -77,9 +77,11 @@ class IngestSummary:
     n_games: int = 0
     n_boxscores_ok: int = 0
     n_boxscores_failed: int = 0
+    n_boxscores_no_stats: int = 0   # la fuente no publica estadisticas (no es un fallo)
     n_shots_ok: int = 0
     n_shots_unavailable: int = 0
     failed_game_ids: list[str] = field(default_factory=list)
+    no_stats_game_ids: list[str] = field(default_factory=list)
     elapsed_seconds: float = 0.0
 
     def __str__(self) -> str:  # resumen legible para consola/notebook
@@ -88,8 +90,10 @@ class IngestSummary:
             f"{self.n_teams} equipos, {self.n_players} jugadores/as, "
             f"{self.n_games} partidos, "
             f"{self.n_boxscores_ok} boxscores ok "
-            f"({self.n_boxscores_failed} fallidos), "
-            f"{self.n_shots_ok} partidos con tiros guardados "
+            f"({self.n_boxscores_failed} fallidos"
+            + (f", {self.n_boxscores_no_stats} sin estadisticas en la fuente"
+               if self.n_boxscores_no_stats else "")
+            + f"), {self.n_shots_ok} partidos con tiros guardados "
             f"({self.n_shots_unavailable} sin tiros disponibles), "
             f"{self.elapsed_seconds:.1f}s"
         )
@@ -214,6 +218,11 @@ def ingest_source(
                     summary.n_boxscores_ok += 1
                 except RateLimitedError:
                     raise  # nunca se traga -- ver docstring del modulo
+                except BoxscoreNotPublished:
+                    # La fuente no publica estadisticas de este partido: no es un
+                    # fallo (reintentar no sirve). Se cuenta aparte, sin aviso por partido.
+                    summary.n_boxscores_no_stats += 1
+                    summary.no_stats_game_ids.append(game.game_id)
                 except Exception as exc:  # partido concreto: se avisa y se sigue
                     summary.n_boxscores_failed += 1
                     summary.failed_game_ids.append(game.game_id)
@@ -244,7 +253,10 @@ def ingest_source(
                 if i % 25 == 0 or i == len(target_games):
                     progress(
                         f"[{source}]   boxscores {i}/{len(target_games)} "
-                        f"({summary.n_boxscores_ok} ok, {summary.n_boxscores_failed} fallidos)"
+                        f"({summary.n_boxscores_ok} ok, {summary.n_boxscores_failed} fallidos"
+                        + (f", {summary.n_boxscores_no_stats} sin estadisticas"
+                           if summary.n_boxscores_no_stats else "")
+                        + ")"
                     )
             log_stage(
                 conn, source=source, season=season, stage="boxscores+shots",

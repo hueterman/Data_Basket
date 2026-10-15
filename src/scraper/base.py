@@ -75,6 +75,13 @@ def is_trainable(source: str) -> bool:
 # Formas de datos comunes (ver plano, seccion 07 -- Esquema de datos)
 # ---------------------------------------------------------------------------
 
+class BoxscoreNotPublished(RuntimeError):
+    """La fuente NO publica estadisticas de este partido (la ficha existe,
+    con marcador, pero sin tablas de jugadores). No es un fallo de lectura ni
+    de red: reintentar no lo arregla. El pipeline lo cuenta aparte de los
+    fallos reales (IngestSummary.n_boxscores_no_stats)."""
+
+
 @dataclass(frozen=True)
 class Team:
     team_id: str

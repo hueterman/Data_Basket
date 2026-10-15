@@ -510,6 +510,7 @@ from bs4 import BeautifulSoup
 
 from src.scraper.base import (
     BoxscoreData,
+    BoxscoreNotPublished,
     GameRef,
     Player,
     PlayerStatLine,
@@ -609,6 +610,11 @@ class FebSourceError(RuntimeError):
     """Fallo al extraer datos de baloncestoenvivo.feb.es, con contexto
     de que peticion concreta ha fallado y por que -- mismo estandar de
     codigo del proyecto que en los demas modulos de src/scraper/."""
+
+
+class FebBoxscoreNotPublished(FebSourceError, BoxscoreNotPublished):
+    """La ficha del partido existe pero la FEB no publica sus estadisticas
+    (0 tablas). Ver BoxscoreNotPublished."""
 
 
 def _slugify(name: str) -> str:
@@ -1081,6 +1087,12 @@ class FebSource:
         away_team_id = _team_id_from_href(away_link.get("href", "")) or _slugify(away_link.get_text(strip=True))
 
         tables = panel.find_all("table", recursive=False) or panel.find_all("table")
+        if len(tables) == 0:
+            raise FebBoxscoreNotPublished(
+                f"La ficha de game_id={game_id!r} no trae tablas de estadisticas "
+                f"(la FEB no las publica para este partido; ocurre p. ej. en "
+                f"partidos de enero de 2021 de LEB Oro 2020/21)."
+            )
         if len(tables) < 2:
             raise FebSourceError(
                 f"Se esperaban 2 tablas de estadisticas (una por equipo) "
