@@ -43,15 +43,30 @@ def club_table(conn, source):
                   key=lambda r: r[1])
 
 
+def _years(seasons):
+    out = set()
+    for s in seasons:
+        s = str(s).strip()
+        if s[:4].isdigit():
+            out.add(int(s[:4]))
+    return out
+
+
 def suggest(conn, source):
-    """Pares de clubes con temporadas que NO se solapan y comparten una palabra distintiva."""
+    """Pares de clubes que parecen ser el mismo con otro nombre: comparten una palabra
+    distintiva, NUNCA coinciden en una temporada y alguna temporada de uno es
+    CONSECUTIVA a una del otro (un club que cambia de patrocinador sigue jugando al año
+    siguiente). Mucho menos ruido que comparar todos contra todos."""
     table = club_table(conn, source)
     toks = [{t for t in clubs.normalize_name(n).split() if len(t) >= 4 and t not in _STOP}
             for _k, n, _i, _s in table]
+    yrs = [_years(t[3]) for t in table]
     out = []
     for i in range(len(table)):
         for j in range(i + 1, len(table)):
-            if toks[i] & toks[j] and not (set(table[i][3]) & set(table[j][3])):
+            if not (toks[i] & toks[j]) or (yrs[i] & yrs[j]):
+                continue
+            if any(abs(a - b) == 1 for a in yrs[i] for b in yrs[j]):
                 out.append((table[i], table[j], sorted(toks[i] & toks[j])))
     return out
 
@@ -62,7 +77,15 @@ def main(argv=None) -> int:
     ap.add_argument("--source")
     ap.add_argument("--show", metavar="SOURCE")
     ap.add_argument("--suggest", action="store_true")
+    ap.add_argument("--draft", type=Path, metavar="FICHERO",
+                    help="con --suggest: escribe las lineas candidatas (formato club_aliases.csv) "
+                         "en FICHERO para revisarlas/editarlas antes de usarlas")
     args = ap.parse_args(argv)
+    try:  # que `| head` no deje un traceback
+        import signal
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+    except (ImportError, AttributeError, ValueError):
+        pass
     conn = sqlite3.connect(str(args.db), timeout=120)
 
     if args.show:
@@ -73,13 +96,20 @@ def main(argv=None) -> int:
     if args.suggest:
         sources = [args.source] if args.source else [
             r[0] for r in conn.execute("SELECT DISTINCT source FROM team_club ORDER BY 1")]
+        draft = ["source,name,same_as"]
         for src in sources:
             pairs = suggest(conn, src)
             print(f"\n== {src}: {len(pairs)} posibles cambios de nombre ==")
             for a, b, shared in pairs:
                 print(f"  {a[1]} [{', '.join(a[3])}]  <->  {b[1]} [{', '.join(b[3])}]   (comun: {', '.join(shared)})")
                 print(f"     -> {src},{b[1]},{a[1]}")
-        print("\nPara unir un par, copia la linea '->' en src/pipeline/club_aliases.csv y recalcula.")
+                draft.append(f"{src},{b[1]},{a[1]}")
+        if args.draft:
+            args.draft.write_text("\n".join(draft) + "\n", encoding="utf-8")
+            print(f"\nBorrador escrito en {args.draft} ({len(draft) - 1} lineas). Revisalo y copia las "
+                  f"buenas a src/pipeline/club_aliases.csv.")
+        else:
+            print("\nPara unir un par, copia la linea '->' en src/pipeline/club_aliases.csv y recalcula.")
         return 0
 
     n = clubs.rebuild(conn, [args.source] if args.source else None)

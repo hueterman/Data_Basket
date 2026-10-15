@@ -66,3 +66,26 @@ def test_rebuild_load_y_apply():
     assert clubs.club_of(c, "feb", "9") == "9"
     assert clubs.rebuild(c, ["feb"]) == 3                            # idempotente
     assert c.execute("SELECT COUNT(*) FROM team_club").fetchone()[0] == 3
+
+
+def test_suggest_solo_pares_consecutivos_y_sin_temporadas_en_comun(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "build_clubs", __import__("pathlib").Path(__file__).resolve().parent.parent / "scripts" / "build_clubs.py")
+    bc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bc)
+
+    c = sqlite3.connect(":memory:")
+    c.execute("CREATE TABLE teams(source TEXT, team_id TEXT, name TEXT)")
+    c.execute("CREATE TABLE games(source TEXT, game_id TEXT, season TEXT, home_team_id TEXT, away_team_id TEXT)")
+    equipos = [("1", "ICG FORCA LLEIDA", "2018"), ("2", "ACTEL FORCA LLEIDA", "2017"),      # consecutivos
+               ("3", "FORCA LLEIDA CLUB", "2012"),                                           # lejano
+               ("4", "OTRO LLEIDA ESPORTIU", "2018")]                                        # coincide con 1
+    for tid, name, ss in equipos:
+        c.execute("INSERT INTO teams VALUES('feb', ?, ?)", (tid, name))
+        c.execute("INSERT INTO games VALUES('feb', ?, ?, ?, 'zz')", (tid, ss, tid))
+    c.commit()
+    nombres = {frozenset((a[1], b[1])) for a, b, _ in bc.suggest(c, "feb")}
+    assert frozenset(("ICG FORCA LLEIDA", "ACTEL FORCA LLEIDA")) in nombres
+    assert frozenset(("ACTEL FORCA LLEIDA", "FORCA LLEIDA CLUB")) not in nombres   # no consecutivos
+    assert not any(n == frozenset(("ICG FORCA LLEIDA", "OTRO LLEIDA ESPORTIU")) for n in nombres)  # misma temporada
