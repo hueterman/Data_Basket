@@ -122,6 +122,18 @@ def _fmt_es(value, decimales=0):
     return s.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
+@app.template_filter("mmss")
+def _fmt_mmss(value):
+    # Minutos decimales -> m:ss (22.8166 -> 22:49), formato habitual en baloncesto.
+    if value is None:
+        return "—"
+    try:
+        total = int(round(float(value) * 60))
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{total // 60}:{total % 60:02d}"
+
+
 @app.route("/")
 def index():
     conn = db()

@@ -57,7 +57,7 @@
         <tr>
           <td><a href="{{ url_for('player_detail', source=game.source, player_id=p.player_id) }}">{{ p.player_name }}</a></td>
           <td>{{ team_names.get(p.team_id, p.team_id) }}</td>
-          <td>{{ p.minutes if p.minutes is not none else "—" }}</td>
+          <td>{{ p.minutes|mmss if p.minutes is not none else "—" }}</td>
           <td>{{ p.points if p.points is not none else "—" }}</td>
           <td>{{ p.rebounds if p.rebounds is not none else "—" }}</td>
           <td>{{ p.assists if p.assists is not none else "—" }}</td>

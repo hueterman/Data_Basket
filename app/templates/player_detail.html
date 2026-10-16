@@ -9,10 +9,10 @@
 
   <div class="stat-grid">
     <div class="stat-tile"><div class="n">{{ n }}</div><div class="label">Partidos con boxscore</div></div>
-    <div class="stat-tile"><div class="n">{{ averages.points if averages.points is not none else "—" }}</div><div class="label">Puntos / partido</div></div>
-    <div class="stat-tile"><div class="n">{{ averages.rebounds if averages.rebounds is not none else "—" }}</div><div class="label">Rebotes / partido</div></div>
-    <div class="stat-tile"><div class="n">{{ averages.assists if averages.assists is not none else "—" }}</div><div class="label">Asistencias / partido</div></div>
-    <div class="stat-tile"><div class="n">{{ averages.val if averages.val is not none else "—" }}</div><div class="label">Valoración / partido</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.points|es(1) if averages.points is not none else "—" }}</div><div class="label">Puntos / partido</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.rebounds|es(1) if averages.rebounds is not none else "—" }}</div><div class="label">Rebotes / partido</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.assists|es(1) if averages.assists is not none else "—" }}</div><div class="label">Asistencias / partido</div></div>
+    <div class="stat-tile"><div class="n">{{ averages.val|es(1) if averages.val is not none else "—" }}</div><div class="label">Valoración / partido</div></div>
   </div>
 
   <h2>Partido a partido</h2>
@@ -28,7 +28,7 @@
           <td><a href="{{ url_for('game_detail', source=player.source, game_id=r.game_id) }}">{{ r.date or r.game_id }}</a></td>
           <td>{{ r.season }}</td>
           <td>{{ r.team_id }}</td>
-          <td>{{ r.minutes if r.minutes is not none else "—" }}</td>
+          <td>{{ r.minutes|mmss if r.minutes is not none else "—" }}</td>
           <td>{{ r.points if r.points is not none else "—" }}</td>
           <td>{{ r.rebounds if r.rebounds is not none else "—" }}</td>
           <td>{{ r.assists if r.assists is not none else "—" }}</td>
