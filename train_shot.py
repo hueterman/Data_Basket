@@ -375,6 +375,37 @@ def main() -> None:
 
     sanity = sanity_check_by_zone(test_df, prob_logreg)
 
+    # Metricas de ACB SOLO con posicion conocida. Las de arriba incluyen los
+    # mates imputados (casi todo aciertos pegados al aro): XGBoost reconoce el
+    # valor constante de la imputacion y el AUC de ACB sube ~0.03 sin que sea
+    # habilidad real. Esta linea es la cifra honesta para citar de ACB.
+    if "pos_known" in test_df.columns:
+        known = test_df["pos_known"].astype(bool)
+    elif {"loc_x", "loc_y"}.issubset(test_df.columns):
+        known = ~((test_df["source"] == "acb") & (test_df["loc_x"] == 0) & (test_df["loc_y"] == 0))
+    else:
+        known = None
+    metrics_acb_known = {}
+    if known is None:
+        print("\n  aviso: no se pudo identificar los tiros sin posicion en test; "
+              "se omiten las metricas de ACB con posicion conocida")
+    else:
+        m_acb = ((test_df["source"] == "acb") & known).to_numpy()
+        if m_acb.sum() > 0 and len(np.unique(y_test[m_acb])) == 2:
+            print(f"\nACB con posicion conocida (test, {int(m_acb.sum())} tiros; "
+                  f"excluye mates imputados):")
+            metrics_acb_known = {
+                "n": int(m_acb.sum()),
+                "baseline": evaluate("Baseline [ACB pos. conocida]", y_test[m_acb],
+                                     np.full(int(m_acb.sum()), fg_rate)),
+                "logreg": evaluate("Regresion logistica [ACB pos. conocida]", y_test[m_acb],
+                                   prob_logreg[m_acb]),
+                "xgboost": evaluate("XGBoost [ACB pos. conocida]", y_test[m_acb],
+                                    prob_xgb[m_acb]),
+            }
+        else:
+            print("\n  aviso: sin tiros ACB con posicion conocida en test (o una sola clase)")
+
     print("\nFG% real por zona y fuente, sobre TODOS los tiros utilizables (referencia, no solo test):")
     print(zone_fg_pct(shots, by=["source"]).round(3).to_string(index=False))
 
@@ -405,6 +436,7 @@ def main() -> None:
         "league_zone_fg": league_zone_fg.to_dict(orient="records"),
         "shot_prior_k_shrink": SHOT_PRIOR_K_SHRINK,
         "library_versions": versions,
+        "metrics_acb_pos_conocida": metrics_acb_known,
     }
     with open(MODELS_DIR / "shot_make_metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)

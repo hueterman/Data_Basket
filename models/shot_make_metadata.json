@@ -377,5 +377,27 @@
       "fg_pct": 0.26976744186046514
     }
   ],
-  "shot_prior_k_shrink": 20.0
+  "shot_prior_k_shrink": 20.0,
+  "library_versions": {
+    "scikit-learn": "1.7.2",
+    "xgboost": "3.2.0"
+  },
+  "metrics_acb_pos_conocida": {
+    "n": 120234,
+    "baseline": {
+      "accuracy": 0.5556414990768003,
+      "log_loss": 0.6871395181205947,
+      "roc_auc": 0.5
+    },
+    "logreg": {
+      "accuracy": 0.6300464095014722,
+      "log_loss": 0.6530508827064505,
+      "roc_auc": 0.6373103133822221
+    },
+    "xgboost": {
+      "accuracy": 0.6336394031638305,
+      "log_loss": 0.6492422053080769,
+      "roc_auc": 0.6436579788360146
+    }
+  }
 }
