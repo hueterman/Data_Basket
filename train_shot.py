@@ -220,11 +220,50 @@ def sanity_check_by_zone(test_df: pd.DataFrame, y_prob: np.ndarray) -> dict:
     return out.reset_index().to_dict(orient="records")
 
 
+def _pinned_versions() -> dict:
+    # Versiones fijadas con "==" en requirements.txt para los paquetes cuyos
+    # modelos se serializan con joblib/pickle (una sola fuente de verdad).
+    import re
+    req = Path(__file__).resolve().parent / "requirements.txt"
+    pins = {}
+    if req.exists():
+        for line in req.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"\s*(scikit-learn|xgboost)\s*==\s*([0-9][^\s#]*)", line)
+            if m:
+                pins[m.group(1)] = m.group(2)
+    return pins
+
+
+def check_pinned_versions(allow_mismatch: bool = False) -> dict:
+    # Aborta si scikit-learn/xgboost instalados no coinciden con
+    # requirements.txt: un .joblib entrenado con otra version puede no
+    # cargar en la Pi (p. ej. "_RemainderColsList" con sklearn 1.5.1 vs
+    # 1.7.2). Devuelve las versiones instaladas para guardarlas en el metadata.
+    from importlib import metadata
+    installed = {n: metadata.version(n) for n in ("scikit-learn", "xgboost")}
+    bad = {n: (installed[n], v) for n, v in _pinned_versions().items()
+           if installed.get(n) != v}
+    if bad:
+        detail = "; ".join(f"{n}: instalada {i}, fijada {v}" for n, (i, v) in bad.items())
+        msg = (f"Versiones distintas de requirements.txt ({detail}). Los modelos "
+               f"guardados podrian no cargar en la Pi. Ejecuta "
+               f"'pip install -r requirements.txt' o usa --allow-version-mismatch.")
+        if not allow_mismatch:
+            raise SystemExit(msg)
+        print(f"  AVISO: {msg}")
+    return installed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--test-frac", type=float, default=0.2,
                          help="Fraccion de PARTIDOS (por fuente, cronologica) reservada para test (default 0.2).")
+    parser.add_argument(
+        "--allow-version-mismatch", action="store_true",
+        help="no abortar si scikit-learn/xgboost difieren de requirements.txt",
+    )
     args = parser.parse_args()
+    versions = check_pinned_versions(args.allow_version_mismatch)
 
     conn = get_connection()
     print(f"Construyendo dataset de tiros (build_shot_features(), fuentes calibradas y "
@@ -365,6 +404,7 @@ def main() -> None:
         # add_shot_priors() al construir este dataset.
         "league_zone_fg": league_zone_fg.to_dict(orient="records"),
         "shot_prior_k_shrink": SHOT_PRIOR_K_SHRINK,
+        "library_versions": versions,
     }
     with open(MODELS_DIR / "shot_make_metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2, ensure_ascii=False)
