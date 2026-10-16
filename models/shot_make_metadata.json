@@ -10,9 +10,10 @@
     "source"
   ],
   "test_frac": 0.2,
-  "n_train": 1955826,
-  "n_test": 496376,
+  "n_train": 3008124,
+  "n_test": 897422,
   "sources": [
+    "acb",
     "copaespaa",
     "eurocup",
     "euroleague",
@@ -27,78 +28,103 @@
   ],
   "metrics": {
     "baseline": {
-      "accuracy": 0.5438377359098747,
-      "log_loss": 0.6893089810917662,
+      "accuracy": 0.5402809380648124,
+      "log_loss": 0.6899590922449338,
       "roc_auc": 0.5
     },
     "logreg": {
-      "accuracy": 0.6310740245297919,
-      "log_loss": 0.6493676617132348,
-      "roc_auc": 0.6520643758377219
+      "accuracy": 0.6307010525705855,
+      "log_loss": 0.649876958689423,
+      "roc_auc": 0.6512803022449443
     },
     "xgboost": {
-      "accuracy": 0.6338682772736797,
-      "log_loss": 0.6430595665716176,
-      "roc_auc": 0.6584678987255105
+      "accuracy": 0.6329096010572507,
+      "log_loss": 0.6431735875223361,
+      "roc_auc": 0.6577121694735029
     }
   },
   "sanity_check_by_zone": [
     {
       "zone": "aro",
-      "intentos": 115372,
+      "intentos": 219123,
       "fg_pct_real": 0.679,
-      "prob_media_predicha": 0.673
+      "prob_media_predicha": 0.667
     },
     {
       "zone": "media_larga",
-      "intentos": 74461,
-      "fg_pct_real": 0.394,
-      "prob_media_predicha": 0.407
+      "intentos": 131076,
+      "fg_pct_real": 0.399,
+      "prob_media_predicha": 0.416
     },
     {
       "zone": "pintura_corta",
-      "intentos": 104869,
-      "fg_pct_real": 0.461,
-      "prob_media_predicha": 0.462
+      "intentos": 179183,
+      "fg_pct_real": 0.456,
+      "prob_media_predicha": 0.454
     },
     {
       "zone": "triple_arco",
-      "intentos": 156464,
-      "fg_pct_real": 0.34,
-      "prob_media_predicha": 0.343
+      "intentos": 281526,
+      "fg_pct_real": 0.343,
+      "prob_media_predicha": 0.345
     },
     {
       "zone": "triple_esquina",
-      "intentos": 45210,
-      "fg_pct_real": 0.383,
-      "prob_media_predicha": 0.387
+      "intentos": 86514,
+      "fg_pct_real": 0.382,
+      "prob_media_predicha": 0.388
     }
   ],
   "league_zone_fg": [
     {
+      "source": "acb",
+      "zone": "aro",
+      "fg_pct": 0.7094447566021351
+    },
+    {
+      "source": "acb",
+      "zone": "media_larga",
+      "fg_pct": 0.3784786981166575
+    },
+    {
+      "source": "acb",
+      "zone": "pintura_corta",
+      "fg_pct": 0.44261162553934164
+    },
+    {
+      "source": "acb",
+      "zone": "triple_arco",
+      "fg_pct": 0.3458905461637465
+    },
+    {
+      "source": "acb",
+      "zone": "triple_esquina",
+      "fg_pct": 0.38244708034105274
+    },
+    {
       "source": "copaespaa",
       "zone": "aro",
-      "fg_pct": 0.6681715575620768
+      "fg_pct": 0.6733870967741935
     },
     {
       "source": "copaespaa",
       "zone": "media_larga",
-      "fg_pct": 0.3348729792147806
+      "fg_pct": 0.3668639053254438
     },
     {
       "source": "copaespaa",
       "zone": "pintura_corta",
-      "fg_pct": 0.5040650406504065
+      "fg_pct": 0.5086071987480438
     },
     {
       "source": "copaespaa",
       "zone": "triple_arco",
-      "fg_pct": 0.34233261339092874
+      "fg_pct": 0.3362658846529814
     },
     {
       "source": "copaespaa",
       "zone": "triple_esquina",
-      "fg_pct": 0.4716981132075472
+      "fg_pct": 0.4594594594594595
     },
     {
       "source": "eurocup",
@@ -153,127 +179,127 @@
     {
       "source": "feb",
       "zone": "aro",
-      "fg_pct": 0.6808222883418988
+      "fg_pct": 0.6816411321734615
     },
     {
       "source": "feb",
       "zone": "media_larga",
-      "fg_pct": 0.37217999019127024
+      "fg_pct": 0.37181950509461426
     },
     {
       "source": "feb",
       "zone": "pintura_corta",
-      "fg_pct": 0.5011343283582089
+      "fg_pct": 0.5032466921382996
     },
     {
       "source": "feb",
       "zone": "triple_arco",
-      "fg_pct": 0.3454167091112825
+      "fg_pct": 0.34508934755506304
     },
     {
       "source": "feb",
       "zone": "triple_esquina",
-      "fg_pct": 0.3890702869908919
+      "fg_pct": 0.3862625597100972
     },
     {
       "source": "lf2",
       "zone": "aro",
-      "fg_pct": 0.5896739130434783
+      "fg_pct": 0.5905192949023345
     },
     {
       "source": "lf2",
       "zone": "media_larga",
-      "fg_pct": 0.2738348481918391
+      "fg_pct": 0.2724131660301873
     },
     {
       "source": "lf2",
       "zone": "pintura_corta",
-      "fg_pct": 0.40413094310210446
+      "fg_pct": 0.40696980546604605
     },
     {
       "source": "lf2",
       "zone": "triple_arco",
-      "fg_pct": 0.2748678519942335
+      "fg_pct": 0.2764837625979843
     },
     {
       "source": "lf2",
       "zone": "triple_esquina",
-      "fg_pct": 0.31518987341772153
+      "fg_pct": 0.31534772182254195
     },
     {
       "source": "lfchallenge",
       "zone": "aro",
-      "fg_pct": 0.6004166272133321
+      "fg_pct": 0.6005492970859324
     },
     {
       "source": "lfchallenge",
       "zone": "media_larga",
-      "fg_pct": 0.3161886242100146
+      "fg_pct": 0.3155518555281611
     },
     {
       "source": "lfchallenge",
       "zone": "pintura_corta",
-      "fg_pct": 0.4363681977831501
+      "fg_pct": 0.4360310969307509
     },
     {
       "source": "lfchallenge",
       "zone": "triple_arco",
-      "fg_pct": 0.29437762951000807
+      "fg_pct": 0.29435154762153903
     },
     {
       "source": "lfchallenge",
       "zone": "triple_esquina",
-      "fg_pct": 0.32693691532741664
+      "fg_pct": 0.3251897533206831
     },
     {
       "source": "lfendesa",
       "zone": "aro",
-      "fg_pct": 0.6175250293136105
+      "fg_pct": 0.6182800460543796
     },
     {
       "source": "lfendesa",
       "zone": "media_larga",
-      "fg_pct": 0.34190861901774
+      "fg_pct": 0.34129185932464623
     },
     {
       "source": "lfendesa",
       "zone": "pintura_corta",
-      "fg_pct": 0.4596254148885728
+      "fg_pct": 0.4601921916345574
     },
     {
       "source": "lfendesa",
       "zone": "triple_arco",
-      "fg_pct": 0.3150469862795513
+      "fg_pct": 0.31478721274276433
     },
     {
       "source": "lfendesa",
       "zone": "triple_esquina",
-      "fg_pct": 0.36115142718916304
+      "fg_pct": 0.3614600616259777
     },
     {
       "source": "nba",
       "zone": "aro",
-      "fg_pct": 0.6562828334961568
+      "fg_pct": 0.638330108976739
     },
     {
       "source": "nba",
       "zone": "media_larga",
-      "fg_pct": 0.4250864729037102
+      "fg_pct": 0.41386589820058306
     },
     {
       "source": "nba",
       "zone": "pintura_corta",
-      "fg_pct": 0.4280017418009305
+      "fg_pct": 0.4160832223950591
     },
     {
       "source": "nba",
       "zone": "triple_arco",
-      "fg_pct": 0.35080612550724777
+      "fg_pct": 0.3491415101513193
     },
     {
       "source": "nba",
       "zone": "triple_esquina",
-      "fg_pct": 0.385357606496996
+      "fg_pct": 0.38484616391985366
     },
     {
       "source": "nextgen",
@@ -303,52 +329,52 @@
     {
       "source": "segundafeb",
       "zone": "aro",
-      "fg_pct": 0.6587806677734735
+      "fg_pct": 0.6584900517852276
     },
     {
       "source": "segundafeb",
       "zone": "media_larga",
-      "fg_pct": 0.3420697529582728
+      "fg_pct": 0.3410324695278091
     },
     {
       "source": "segundafeb",
       "zone": "pintura_corta",
-      "fg_pct": 0.4694804982508909
+      "fg_pct": 0.46902313624678665
     },
     {
       "source": "segundafeb",
       "zone": "triple_arco",
-      "fg_pct": 0.3102193346685555
+      "fg_pct": 0.31023546371936567
     },
     {
       "source": "segundafeb",
       "zone": "triple_esquina",
-      "fg_pct": 0.3529029462738302
+      "fg_pct": 0.3535052205412316
     },
     {
       "source": "tercerafeb",
       "zone": "aro",
-      "fg_pct": 0.6653696498054474
+      "fg_pct": 0.6536388140161725
     },
     {
       "source": "tercerafeb",
       "zone": "media_larga",
-      "fg_pct": 0.25653206650831356
+      "fg_pct": 0.272984441301273
     },
     {
       "source": "tercerafeb",
       "zone": "pintura_corta",
-      "fg_pct": 0.40502793296089384
+      "fg_pct": 0.45528455284552843
     },
     {
       "source": "tercerafeb",
       "zone": "triple_arco",
-      "fg_pct": 0.30434782608695654
+      "fg_pct": 0.2962962962962963
     },
     {
       "source": "tercerafeb",
       "zone": "triple_esquina",
-      "fg_pct": 0.23931623931623933
+      "fg_pct": 0.26976744186046514
     }
   ],
   "shot_prior_k_shrink": 20.0

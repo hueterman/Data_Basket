@@ -44,8 +44,8 @@ propiedades del LANZAMIENTO, no de su resultado):
 
 FUENTES: solo las que ya tienen coordenadas de tiro calibradas Y son
 TRAINABLE (ver SHOT_COORD_CALIBRATION en src/features.py) -- a fecha
-de esta sesion eso es NBA, Euroliga y EuroCup. ACB no implementa
-get_shots() (sin endpoint de coordenadas conocido, ver acb.py); FEB
+de esta sesion eso incluye NBA, Euroliga, EuroCup y ACB. ACB implementa
+get_shots() (api2.acb.com, desde 2016-17; ver acb.py) y entra en el modelo; sus mates sin posicion (pos_known=False, marcador (0,0) de la API) se imputan al aro con la mediana de dist_m/angle_deg de los tiros del aro con posicion conocida; FEB
 sin partidos jugados todavia; WNBA SI tiene tiros con coordenadas
 calibradas, pero es NON_TRAINABLE y build_shot_features(trainable_
 only=True, el default) ya la excluye -- nunca pasar sources=["wnba"]
@@ -234,6 +234,23 @@ def main() -> None:
         print("  (vacio -- no hay tiros de fuentes entrenables todavia en la base de datos)")
         conn.close()
         return
+
+    # Mates sin posicion (pos_known=False, marcador (0,0) de la API de la ACB;
+    # ver build_shot_features): se conservan como aciertos del aro imputando
+    # dist_m/angle_deg con la mediana de los tiros del aro con posicion
+    # conocida de la misma fuente. Sin esto, el dropna de mas abajo los
+    # eliminaria (todos son aciertos) y el acierto del aro de ACB bajaria
+    # de ~70.9 % a ~67.3 %.
+    if "pos_known" in shots.columns:
+        unknown = ~shots["pos_known"].astype(bool)
+        for src in shots.loc[unknown, "source"].unique():
+            m_src = shots["source"] == src
+            ref = shots[m_src & ~unknown & (shots["zone"] == "aro")]
+            miss = m_src & unknown
+            for col in ("dist_m", "angle_deg"):
+                shots.loc[miss, col] = ref[col].median()
+        print(f"  {int(unknown.sum())} tiros sin posicion (mates) con dist_m/angle_deg "
+              f"imputados al aro (mediana por fuente)")
 
     src_list = sorted(shots["source"].unique())
     placeholders = ",".join("?" for _ in src_list)
