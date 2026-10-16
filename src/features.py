@@ -410,8 +410,18 @@ def build_shot_features(
         for d, x, ta, tc in zip(shots["dist_m"], shots["loc_x_m"], three_arc, three_corner)
     ]
 
+    # Tiros sin posicion real: la API de la ACB devuelve (0, 0) como
+    # marcador en los mates (playType 100; confirmado en 24 partidos: el
+    # 100 % de los (0, 0) son mates anotados en restricted_area). Se
+    # conservan (zona/acierto validos: la zona ya esta calculada arriba),
+    # pero su posicion queda a NaN para no sesgar distancia/angulo/mapas.
+    shots["pos_known"] = ~(
+        (shots["source"] == "acb") & (shots["loc_x"] == 0) & (shots["loc_y"] == 0)
+    )
+    shots.loc[~shots["pos_known"], ["loc_x_m", "loc_y_m", "dist_m", "angle_deg"]] = np.nan
+
     cols = ["source", "game_id", "player_id", "team_id", "loc_x", "loc_y",
-            "loc_x_m", "loc_y_m", "dist_m", "angle_deg", "zone", "made", "shot_type"]
+            "loc_x_m", "loc_y_m", "dist_m", "angle_deg", "zone", "made", "shot_type", "pos_known"]
     return shots[cols].reset_index(drop=True)
 
 
