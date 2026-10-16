@@ -151,7 +151,13 @@ un torneo de pretemporada fuera de las fechas habituales), pero
 `GameRef.season` siempre guarda la temporada REALMENTE PEDIDA, no la
 derivada.
 
-`get_shots(game_id)` sigue SIN IMPLEMENTAR, ahora con una
+`get_shots(game_id)` -- ACTUALIZADO 2026-10-16: YA IMPLEMENTADO via la API
+api2.acb.com (ver constantes _API_BASE/_SHOTS_PATH). El parrafo siguiente
+describe la conclusion ANTERIOR (solo se miraron las paginas HTML de
+live.acb.com), que quedo desmentida al inspeccionar las peticiones de
+red del visor de tiros.
+
+(Historico) get_shots(game_id) estaba SIN IMPLEMENTAR, con una
 confirmacion mas fuerte que en la ronda anterior: se inspecciono en
 vivo tanto la vista "Jugadas" (jugada a jugada, texto plano con
 sustituciones/faltas/canastas y totales corriendo, sin coordenadas)
@@ -213,8 +219,10 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
 import time
+from pathlib import Path
 
 import pandas as pd
 import requests
@@ -244,6 +252,25 @@ _HEADERS = {
 }
 
 _DEFAULT_TIMEOUT = 30
+
+# --- API de coordenadas de tiro (AÑADIDO 2026-10-16) -----------------------
+# Descubierta via DevTools en live.acb.com (peticion `match-shots`) y
+# contrastada con el paquete de R BAwiR (do_scrape_shots_acb, G. Vinue), que
+# usa el mismo endpoint. Contradice la conclusion previa de este modulo
+# ("ACB no expone coordenadas"): las pantallas HTML de live.acb.com no las
+# muestran, pero la API que alimenta el visor de tiros SI las sirve.
+# Requiere cabecera X-APIKEY (la clave publica de la propia web) -> se lee de
+# la variable de entorno ACB_API_KEY o de .env en la raiz del proyecto.
+_API_BASE = "https://api2.acb.com"
+_SHOTS_PATH = "/api/matchdata/MatchShots/match-shots"
+
+# playType de la API -> (tipo, anotado). 92/96 (tiros libres) y 533 se
+# descartan, igual que hace BAwiR. 100 = mate (anotado, cuenta como T2).
+_FIELD_GOAL_PLAY_TYPES = {
+    93: ("2", True), 94: ("3", True), 97: ("2", False), 98: ("3", False),
+    100: ("2", True),
+}
+_ENV_KEY_NAME = "ACB_API_KEY"
 
 # game_id = "{slug1}-vs-{slug2}-{numero}", tal y como lo usa live.acb.com.
 _GAME_ID_RE = re.compile(r"^(?P<slug1>[a-z0-9-]+)-vs-(?P<slug2>[a-z0-9-]+)-(?P<numero>\d+)$")
@@ -408,13 +435,15 @@ class AcbSource:
                 delay = max(delay, float(retry_after))
         return min(delay, _RETRY_MAX_DELAY)
 
-    def _get(self, url: str) -> requests.Response:
+    def _get(self, url: str, headers: dict | None = None,
+             params: dict | None = None) -> requests.Response:
         """GET con reintentos (ver _MAX_RETRIES). Lanza requests.RequestException
         si se agotan o si el error no es transitorio -- los llamadores ya lo
         envuelven en AcbSourceError."""
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                response = self._session.get(url, timeout=_DEFAULT_TIMEOUT)
+                response = self._session.get(
+                    url, headers=headers, params=params, timeout=_DEFAULT_TIMEOUT)
             except (requests.ConnectionError, requests.Timeout) as exc:
                 if attempt >= _MAX_RETRIES:
                     raise
@@ -839,16 +868,183 @@ class AcbSource:
         return BoxscoreData(game_id=game_id, team_stats=team_stats, player_stats=player_stats)
 
     def get_shots(self, game_id: str) -> list[Shot]:
+        """Coordenadas de tiro de un partido via api2.acb.com (ver
+        constantes _API_BASE/_SHOTS_PATH arriba).
+
+        Unidad: la NATIVA de la API, sin convertir (igual que euroleague.py;
+        la normalizacion a metros es cosa de src/pipeline/). Segun la
+        documentacion de BAwiR, pos_x va de 0 (linea de fondo, tablero) a
+        ~24800 y pos_y de ~-7470 a ~7450 (centro de pista = 0): son
+        milimetros, no metros. SIN CONFIRMAR todavia con datos reales:
+        scripts/test_acb_shots.py lo comprueba (agrupacion de tiros cerca
+        del aro, distancia del triple).
+
+        `player_id` es el ID de licencia ACB (numerico), distinto del
+        nombre abreviado que usa get_boxscore() -- ver aviso en el
+        docstring del modulo; hay que cruzarlos por nombre/plantilla.
+
+        Solo intentos de campo (2/3 puntos y mates). Si el JSON no trae la
+        forma esperada se lanza AcbSourceError indicando que claves llegaron
+        (nunca se devuelve una lista vacia en silencio)."""
+        slug1, slug2, numero = self._split_game_id(game_id)
+        api_key = _load_api_key()
+        headers = {
+            "Accept": "*/*",
+            "Origin": _LIVE_BASE,
+            "Referer": f"{_LIVE_BASE}/",
+            "X-APIKEY": api_key,
+        }
+        try:
+            response = self._get(
+                f"{_API_BASE}{_SHOTS_PATH}", headers=headers, params={"matchId": numero}
+            )
+            payload = response.json()
+        except requests.RequestException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            hint = (" -- la X-APIKEY puede haber caducado: volver a copiarla de "
+                    "DevTools (ver .env)") if status in (401, 403) else ""
+            raise AcbSourceError(
+                f"Fallo pidiendo tiros de game_id={game_id!r} (matchId={numero}): {exc}{hint}"
+            ) from exc
+        except ValueError as exc:
+            raise AcbSourceError(
+                f"La respuesta de match-shots de game_id={game_id!r} no es JSON: {exc}"
+            ) from exc
+
+        return _parse_shots_payload(payload, game_id, slug1, slug2)
+
+
+def _load_api_key() -> str:
+    """X-APIKEY de ACB: variable de entorno ACB_API_KEY o, si no, la linea
+    ACB_API_KEY=... de `.env` en la raiz del proyecto. Nunca se escribe en
+    el codigo ni en el repositorio."""
+    key = os.environ.get(_ENV_KEY_NAME, "").strip()
+    if not key:
+        env_file = Path(__file__).resolve().parent.parent.parent / ".env"
+        try:
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                name, sep, value = line.partition("=")
+                if sep and name.strip() == _ENV_KEY_NAME:
+                    key = value.strip().strip("\"'")
+                    break
+        except OSError:
+            pass
+    if not key:
         raise AcbSourceError(
-            "get_shots() no esta implementado: se confirmo en vivo "
-            "(inspeccionando las vistas 'Jugadas' y 'Avanzado' de "
-            "live.acb.com y buscando explicitamente cualquier campo de "
-            "coordenadas) que ACB no expone datos de posicion de tiro "
-            "en ninguna pagina publica -- no es una limitacion de tiempo "
-            "de exploracion, es una confirmacion de que el dato no "
-            "existe ahi (ver docstring del modulo)."
+            f"Falta la clave de la API de ACB: define la variable de entorno "
+            f"{_ENV_KEY_NAME} o añade la linea {_ENV_KEY_NAME}=... a .env "
+            f"(se copia de DevTools -> Network -> match-shots -> X-Apikey)."
+        )
+    return key
+
+
+def _norm_key(name: object) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(name).lower())
+
+
+def _pick(record: dict, *candidates: str):
+    """Valor de la primera clave de `candidates` presente en `record`,
+    ignorando mayusculas y separadores (posX == pos_x == POS_X)."""
+    normalized = {_norm_key(k): v for k, v in record.items()}
+    for cand in candidates:
+        value = normalized.get(_norm_key(cand))
+        if value is not None:
+            return value
+    return None
+
+
+def _truthy(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str) and value.strip().lower() in {"true", "false", "1", "0"}:
+        return value.strip().lower() in {"true", "1"}
+    return None
+
+
+def _parse_shots_payload(payload: object, game_id: str, home_slug: str, away_slug: str) -> list[Shot]:
+    if not isinstance(payload, dict):
+        raise AcbSourceError(
+            f"match-shots de game_id={game_id!r}: se esperaba un objeto JSON, "
+            f"llego {type(payload).__name__}."
+        )
+    points = _pick(payload, "shotPoints")
+    if not isinstance(points, list):
+        raise AcbSourceError(
+            f"match-shots de game_id={game_id!r}: no hay lista 'shotPoints'. "
+            f"Claves recibidas: {sorted(payload.keys())}"
         )
 
+    # licencia de jugador -> lado (local/visitante), por si el punto de tiro
+    # no trae su propio indicador de local.
+    side_by_license: dict[str, bool] = {}
+    for key, is_home in (("homePlayerStats", True), ("awayPlayerStats", False)):
+        stats = _pick(payload, key)
+        if isinstance(stats, list):
+            for rec in stats:
+                if isinstance(rec, dict):
+                    lic = _pick(rec, "playerLicenseId", "licenseId", "license")
+                    if lic is not None:
+                        side_by_license[str(lic)] = is_home
+
+    shots: list[Shot] = []
+    skipped_non_fg = 0
+    for i, point in enumerate(points):
+        if not isinstance(point, dict):
+            raise AcbSourceError(f"game_id={game_id!r}: shotPoints[{i}] no es un objeto.")
+        try:
+            play_type = int(_pick(point, "playType"))
+        except (TypeError, ValueError):
+            raise AcbSourceError(
+                f"game_id={game_id!r}: shotPoints[{i}] sin playType numerico. "
+                f"Claves: {sorted(point.keys())}"
+            ) from None
+        if play_type not in _FIELD_GOAL_PLAY_TYPES:
+            skipped_non_fg += 1
+            continue
+        shot_type, made = _FIELD_GOAL_PLAY_TYPES[play_type]
+
+        x, y = _pick(point, "posX"), _pick(point, "posY")
+        lic = _pick(point, "playerLicenseId", "licenseId", "license")
+        if x is None or y is None or lic is None:
+            raise AcbSourceError(
+                f"game_id={game_id!r}: shotPoints[{i}] sin posX/posY/licencia de "
+                f"jugador. Claves: {sorted(point.keys())}"
+            )
+
+        is_home = _truthy(_pick(point, "local", "isLocal", "isHome"))
+        if is_home is None:
+            is_home = side_by_license.get(str(lic))
+        if is_home is None:
+            raise AcbSourceError(
+                f"game_id={game_id!r}: no se pudo saber si el tiro de la licencia "
+                f"{lic} es local o visitante (ni 'local' en el tiro ni la "
+                f"licencia en homePlayerStats/awayPlayerStats). Claves del tiro: "
+                f"{sorted(point.keys())}"
+            )
+
+        quarter = _pick(point, "quarter", "period")
+        try:
+            period = int(quarter) if quarter is not None else None
+        except (TypeError, ValueError):
+            period = None
+
+        shots.append(
+            Shot(
+                game_id=game_id,
+                player_id=str(lic),
+                team_id=home_slug if is_home else away_slug,
+                loc_x=float(x),
+                loc_y=float(y),
+                made=made,
+                shot_type=shot_type,
+                period=period,
+            )
+        )
+    if skipped_non_fg:
+        logger.debug("game_id=%s: %d eventos no-tiro-de-campo descartados", game_id, skipped_non_fg)
+    return shots
 
 def _parse_minutes(raw: object) -> float:
     """"MM:SS" -> minutos en float. Igual que en euroleague.py/nba.py:
