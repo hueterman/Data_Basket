@@ -272,6 +272,11 @@ _FIELD_GOAL_PLAY_TYPES = {
 }
 _ENV_KEY_NAME = "ACB_API_KEY"
 
+# Pausa minima (s) entre dos peticiones a api2.acb.com: una temporada son
+# ~300 partidos y la API es la de la propia web de la liga; no se la satura.
+# (BAwiR espera 5 s; 2 s deja una temporada en ~10 min.)
+_API_MIN_INTERVAL_S = 2.0
+
 # Limites de pista en la unidad nativa (mm). La pista FIBA mide 28 m x 15 m, asi
 # que |posY| <= 7500 y 0 <= posX <= 28000 (las coordenadas van reflejadas sobre
 # un unico aro, de modo que los tiros de fondo de pista llegan a x ~ 25000 y SE
@@ -430,6 +435,7 @@ class AcbSource:
     def __init__(self):
         self._session = requests.Session()
         self._session.headers.update(_HEADERS)
+        self._last_api_call = 0.0  # time.monotonic() de la ultima peticion a api2.acb.com
 
     # -- infraestructura HTTP ---------------------------------------------
 
@@ -907,6 +913,10 @@ class AcbSource:
             "Referer": f"{_LIVE_BASE}/",
             "X-APIKEY": api_key,
         }
+        wait = _API_MIN_INTERVAL_S - (time.monotonic() - self._last_api_call)
+        if wait > 0:
+            time.sleep(wait)
+        self._last_api_call = time.monotonic()
         try:
             response = self._get(
                 f"{_API_BASE}{_SHOTS_PATH}", headers=headers, params={"matchId": numero}
