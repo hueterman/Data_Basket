@@ -5,11 +5,11 @@
   <p class="subtitle">data/processed/basketball.db</p>
 
   <div class="stat-grid">
-    <div class="stat-tile"><div class="n">{{ "{:,}".format(counts.games) }}</div><div class="label">Partidos</div></div>
-    <div class="stat-tile"><div class="n">{{ "{:,}".format(counts.teams) }}</div><div class="label">Equipos</div></div>
-    <div class="stat-tile"><div class="n">{{ "{:,}".format(counts.players) }}</div><div class="label">Jugadores/as</div></div>
-    <div class="stat-tile"><div class="n">{{ "{:,}".format(counts.player_stats) }}</div><div class="label">Líneas de boxscore</div></div>
-    <div class="stat-tile"><div class="n">{{ "{:,}".format(counts.shots) }}</div><div class="label">Tiros con coordenadas</div></div>
+    <div class="stat-tile"><div class="n">{{ counts.games|es }}</div><div class="label">Partidos</div></div>
+    <div class="stat-tile"><div class="n">{{ counts.teams|es }}</div><div class="label">Equipos</div></div>
+    <div class="stat-tile"><div class="n">{{ counts.players|es }}</div><div class="label">Jugadores/as</div></div>
+    <div class="stat-tile"><div class="n">{{ counts.player_stats|es }}</div><div class="label">Líneas de boxscore</div></div>
+    <div class="stat-tile"><div class="n">{{ counts.shots|es }}</div><div class="label">Tiros con coordenadas</div></div>
   </div>
 
   <h2>Por fuente</h2>
@@ -38,11 +38,11 @@
               <span class="pill non-trainable">no</span>
             {% endif %}
           </td>
-          <td>{{ "{:,}".format(r.n_teams) }}</td>
-          <td>{{ "{:,}".format(r.n_players) }}</td>
-          <td>{{ "{:,}".format(r.n_games) }}</td>
-          <td>{{ "{:,}".format(r.n_played) }}</td>
-          <td>{{ "{:,}".format(r.n_shots) }}</td>
+          <td>{{ r.n_teams|es }}</td>
+          <td>{{ r.n_players|es }}</td>
+          <td>{{ r.n_games|es }}</td>
+          <td>{{ r.n_played|es }}</td>
+          <td>{{ r.n_shots|es }}</td>
           <td><a href="{{ url_for('games', source=r.source) }}">ver partidos →</a></td>
         </tr>
         {% endfor %}

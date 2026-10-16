@@ -74,14 +74,14 @@
   {% if has_shot_chart %}
     <div class="panel shot-chart">
       <img src="{{ url_for('shot_chart', source=game.source, game_id=game.game_id) }}" alt="Shot chart del partido, un equipo a cada lado" style="max-width:100%;height:auto;">
-      <p class="subtitle" style="margin-top:8px;">{{ "{:,}".format(n_shots) }} tiros con coordenadas guardadas. Pista simplificada (no es el trazado oficial completo, ver src/viz/courts.py).</p>
+      <p class="subtitle" style="margin-top:8px;">{{ n_shots|es }} tiros con coordenadas guardadas. Pista simplificada (no es el trazado oficial completo, ver src/viz/courts.py).</p>
     </div>
   {% endif %}
   {% if has_period_chart %}
     <h2>Tiros por periodo</h2>
     <div class="panel shot-chart">
       <img src="{{ url_for('shot_chart_periods', source=game.source, game_id=game.game_id) }}" alt="Tiros de cada equipo por cuarto, local a la izquierda y visitante a la derecha" style="max-width:100%;height:auto;" loading="lazy">
-      <p class="subtitle" style="margin-top:8px;">Una fila por cuarto (y prórroga si la hubo): local a la izquierda, visitante a la derecha. {{ "{:,}".format(n_period_shots) }} de {{ "{:,}".format(n_shots) }} tiros con periodo registrado.</p>
+      <p class="subtitle" style="margin-top:8px;">Una fila por cuarto (y prórroga si la hubo): local a la izquierda, visitante a la derecha. {{ n_period_shots|es }} de {{ n_shots|es }} tiros con periodo registrado.</p>
     </div>
   {% elif has_shot_chart %}
     <p class="empty">Este partido todavía no tiene el periodo de cada tiro guardado (ver scripts/backfill_shot_periods.py).</p>

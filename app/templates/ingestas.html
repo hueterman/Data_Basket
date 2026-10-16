@@ -77,7 +77,7 @@
   </div>
 
   <h2 id="historial">Historial de ingestas</h2>
-  <p class="subtitle">{{ "{:,}".format(total_logs) }} etapa(s) registrada(s) en total · página {{ log_page }} de {{ log_pages }}</p>
+  <p class="subtitle">{{ total_logs|es }} etapa(s) registrada(s) en total · página {{ log_page }} de {{ log_pages }}</p>
   {% if logs %}
   <div class="panel">
     <table>

@@ -109,6 +109,19 @@ def _sources_list(conn):
 # --------------------------------------------------------------------- #
 
 
+@app.template_filter("es")
+def _fmt_es(value, decimales=0):
+    # Notacion castellana: punto de millares y coma decimal, sin depender del
+    # locale del sistema (Windows y la Raspberry Pi pueden no tener es_ES).
+    if value is None:
+        return ""
+    try:
+        s = f"{float(value):,.{int(decimales)}f}"
+    except (TypeError, ValueError):
+        return str(value)
+    return s.replace(",", "_").replace(".", ",").replace("_", ".")
+
+
 @app.route("/")
 def index():
     conn = db()

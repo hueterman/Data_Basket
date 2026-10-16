@@ -2,7 +2,7 @@
 {% block title %}Jugadores{% endblock %}
 {% block content %}
   <h1>Jugadores/as</h1>
-  <p class="subtitle">{{ "{:,}".format(total) }} resultado(s) · página {{ page }} de {{ pages }}</p>
+  <p class="subtitle">{{ total|es }} resultado(s) · página {{ page }} de {{ pages }}</p>
 
   <form class="filters" method="get">
     <select name="source" onchange="this.form.submit()">
