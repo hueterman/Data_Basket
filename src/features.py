@@ -87,7 +87,28 @@ SHOT_COORD_CALIBRATION: dict[str, dict] = {
         "three_pt_arc_m": 6.750,   # 22'1.75", uniforme (sin variar en la esquina)
         "three_pt_corner_m": 6.750,
     },
-    # acb: sin datos de tiro todavia -- acb.py no implementa get_shots().
+    "acb": {
+        # CALIBRADO 2026-10-16 con la API api2.acb.com (match-shots), 24
+        # partidos / 1111 tiros (scripts/calibrate_acb_hoop_labels.py).
+        # loc_x/loc_y = posX/posY en MILIMETROS, con el ORIGEN EN EL ARO:
+        #  - posX = distancia al aro a lo largo de la pista (0 = plano del
+        #    aro; los tiros por detras de ese plano llegan recortados a 0, de
+        #    ahi que posX minimo sea siempre 0 y haya un pico en x=0);
+        #  - posY = eje lateral, centrado (|posY| <= ~7500).
+        # Todos los tiros vienen reflejados sobre UN solo aro (los tiros de
+        # fondo de pista llegan a posX ~ 25000).
+        # Evidencia: con el aro en x entre -400 y 100 mm, la regla "distancia
+        # al aro >= 6750 mm" reproduce el 100% de las etiquetas triple/doble
+        # de los 1111 tiros; con el aro en 1575 (teorico FIBA) solo el 37.5%.
+        # Aviso: la etiqueta triple/doble parece derivarse de la propia
+        # posicion, asi que esta calibracion no valida por separado la
+        # precision de captura de las coordenadas.
+        # Los ejes se intercambian: la convencion del proyecto es (x lateral,
+        # y a lo largo de la pista).
+        "to_meters": lambda x, y: (y / 1000.0, x / 1000.0),
+        "three_pt_arc_m": 6.75,
+        "three_pt_corner_m": 6.60,
+    },
     #
     # feb / lfendesa / lfchallenge / lf2 / segundafeb / tercerafeb /
     # copaespaa (FebSource, ver feb.py) -- CALIBRADO 2026-09-20, misma

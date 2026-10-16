@@ -881,12 +881,16 @@ class AcbSource:
         constantes _API_BASE/_SHOTS_PATH arriba).
 
         Unidad: la NATIVA de la API, sin convertir (igual que euroleague.py;
-        la normalizacion a metros es cosa de src/pipeline/). Segun la
-        documentacion de BAwiR, pos_x va de 0 (linea de fondo, tablero) a
-        ~24800 y pos_y de ~-7470 a ~7450 (centro de pista = 0): son
-        milimetros, no metros. SIN CONFIRMAR todavia con datos reales:
-        scripts/test_acb_shots.py lo comprueba (agrupacion de tiros cerca
-        del aro, distancia del triple).
+        la normalizacion a metros es cosa de src/pipeline/, ver la entrada
+        "acb" de SHOT_COORD_CALIBRATION en src/features.py). CONFIRMADO con
+        datos reales (2026-10-16): loc_x/loc_y son MILIMETROS con el ORIGEN
+        EN EL ARO (no en la linea de fondo, como decia la documentacion de
+        BAwiR): loc_x = distancia al aro a lo largo de la pista (recortada a
+        0 detras del plano del aro), loc_y = eje lateral centrado. Todos los
+        tiros vienen reflejados sobre un solo aro; los de fondo de pista
+        llegan a loc_x ~ 25000 y se conservan. Se descartan (con aviso en el
+        log) los tiros con |loc_y| > 7600 o loc_x fuera de 0-28500, que son
+        datos corruptos.
 
         `player_id` es el ID de licencia ACB (numerico), distinto del
         nombre abreviado que usa get_boxscore() -- ver aviso en el
