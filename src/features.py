@@ -103,6 +103,9 @@ SHOT_COORD_CALIBRATION: dict[str, dict] = {
         # Aviso: la etiqueta triple/doble parece derivarse de la propia
         # posicion, asi que esta calibracion no valida por separado la
         # precision de captura de las coordenadas.
+        # Las temporadas 2016-17 a 2019-20 llegan de la API en porcentaje de pista
+        # y get_shots() (acb.py) las convierte a este mismo sistema, asi que aqui
+        # TODA la fuente 'acb' va en mm.
         # Los ejes se intercambian: la convencion del proyecto es (x lateral,
         # y a lo largo de la pista).
         "to_meters": lambda x, y: (y / 1000.0, x / 1000.0),

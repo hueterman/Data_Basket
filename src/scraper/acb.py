@@ -898,6 +898,12 @@ class AcbSource:
         log) los tiros con |loc_y| > 7600 o loc_x fuera de 0-28500, que son
         datos corruptos.
 
+        Las temporadas 2016-17 a 2019-20 llegan de la API en porcentaje de
+        pista (0-100) y aqui se convierten a este mismo sistema de mm (ver
+        _percent_to_mm), con menor resolucion (~28 cm a lo largo, ~15 cm
+        lateral) y tiros de mas alla de medio campo atribuidos al aro mas
+        cercano.
+
         `player_id` es el ID de licencia ACB (numerico), distinto del
         nombre abreviado que usa get_boxscore() -- ver aviso en el
         docstring del modulo; hay que cruzarlos por nombre/plantilla.
@@ -986,6 +992,48 @@ def _truthy(value: object) -> bool | None:
     return None
 
 
+# --- Temporadas 2016-17 a 2019-20: coordenadas en PORCENTAJE de pista --------
+# CONFIRMADO 2026-10-16 con la BD real (2017-18, 35378 tiros): la API sirve
+# posX/posY en 0-100 (porcentaje de la pista COMPLETA, x a lo largo con los dos
+# aros en los extremos, y lateral), el mismo sistema que la FEB. La prueba
+# triple/doble acierta el 100% con x longitudinal e y lateral (13.8% con los
+# ejes cambiados). Desde 2020-21 la API sirve milimetros con el origen en el
+# aro. Para que toda la fuente 'acb' tenga UN solo sistema (la calibracion se
+# define por fuente en src/features.py), los partidos en porcentaje se
+# convierten aqui al sistema de milimetros. Un partido se detecta como
+# porcentaje cuando NINGUNA coordenada supera 100: en milimetros eso es
+# imposible (habria que tirar siempre a menos de 10 cm del aro).
+# Limitacion: se pliega al aro mas cercano (min(x, 100-x)), asi que un tiro
+# desde mas alla de medio campo se atribuye al aro del lado donde cae
+# (afecta a ~0.4% de los tiros: los de la franja x 40-60).
+_COURT_LENGTH_M = 28.0
+_COURT_WIDTH_M = 15.0
+_HOOP_FROM_BASELINE_M = 1.575
+
+
+def _is_percent_scale(points: list) -> bool:
+    xs: list[float] = []
+    ys: list[float] = []
+    for p in points:
+        if not isinstance(p, dict):
+            continue
+        try:
+            xs.append(float(_pick(p, "posX")))
+            ys.append(abs(float(_pick(p, "posY"))))
+        except (TypeError, ValueError):
+            continue
+    return bool(xs) and max(xs) <= 100 and max(ys) <= 100
+
+
+def _percent_to_mm(px: float, py: float) -> tuple[float, float]:
+    """(posX %, posY %) -> (loc_x, loc_y) en mm, origen en el aro, igual que
+    el sistema moderno: loc_x = distancia al aro a lo largo de la pista
+    (recortada a 0 detras del plano del aro), loc_y = eje lateral centrado."""
+    depth_m = _COURT_LENGTH_M * min(px, 100.0 - px) / 100.0 - _HOOP_FROM_BASELINE_M
+    lateral_m = py / 100.0 * _COURT_WIDTH_M - _COURT_WIDTH_M / 2.0
+    return max(depth_m, 0.0) * 1000.0, lateral_m * 1000.0
+
+
 def _parse_shots_payload(payload: object, game_id: str, home_slug: str, away_slug: str) -> list[Shot]:
     if not isinstance(payload, dict):
         raise AcbSourceError(
@@ -1014,6 +1062,7 @@ def _parse_shots_payload(payload: object, game_id: str, home_slug: str, away_slu
     shots: list[Shot] = []
     skipped_non_fg = 0
     skipped_out_of_court = 0
+    percent_scale = _is_percent_scale(points)
     for i, point in enumerate(points):
         if not isinstance(point, dict):
             raise AcbSourceError(f"game_id={game_id!r}: shotPoints[{i}] no es un objeto.")
@@ -1044,6 +1093,8 @@ def _parse_shots_payload(payload: object, game_id: str, home_slug: str, away_slu
                 f"game_id={game_id!r}: shotPoints[{i}] con posX/posY no numericos: "
                 f"{x!r}, {y!r}"
             ) from None
+        if percent_scale:
+            x_mm, y_mm = _percent_to_mm(x_mm, y_mm)
         if not (0 <= x_mm <= _MAX_X_MM) or abs(y_mm) > _MAX_ABS_Y_MM:
             skipped_out_of_court += 1
             continue
