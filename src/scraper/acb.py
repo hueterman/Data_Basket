@@ -272,6 +272,15 @@ _FIELD_GOAL_PLAY_TYPES = {
 }
 _ENV_KEY_NAME = "ACB_API_KEY"
 
+# Limites de pista en la unidad nativa (mm). La pista FIBA mide 28 m x 15 m, asi
+# que |posY| <= 7500 y 0 <= posX <= 28000 (las coordenadas van reflejadas sobre
+# un unico aro, de modo que los tiros de fondo de pista llegan a x ~ 25000 y SE
+# CONSERVAN). Se deja un margen por el error de captura manual. Lo que cae fuera
+# es un dato corrupto (p. ej. posY = 23330 visto en el partido 105388) y se
+# descarta con un aviso en el log, nunca en silencio.
+_MAX_ABS_Y_MM = 7600
+_MAX_X_MM = 28500
+
 # game_id = "{slug1}-vs-{slug2}-{numero}", tal y como lo usa live.acb.com.
 _GAME_ID_RE = re.compile(r"^(?P<slug1>[a-z0-9-]+)-vs-(?P<slug2>[a-z0-9-]+)-(?P<numero>\d+)$")
 
@@ -990,6 +999,7 @@ def _parse_shots_payload(payload: object, game_id: str, home_slug: str, away_slu
 
     shots: list[Shot] = []
     skipped_non_fg = 0
+    skipped_out_of_court = 0
     for i, point in enumerate(points):
         if not isinstance(point, dict):
             raise AcbSourceError(f"game_id={game_id!r}: shotPoints[{i}] no es un objeto.")
@@ -1013,6 +1023,17 @@ def _parse_shots_payload(payload: object, game_id: str, home_slug: str, away_slu
                 f"jugador. Claves: {sorted(point.keys())}"
             )
 
+        try:
+            x_mm, y_mm = float(x), float(y)
+        except (TypeError, ValueError):
+            raise AcbSourceError(
+                f"game_id={game_id!r}: shotPoints[{i}] con posX/posY no numericos: "
+                f"{x!r}, {y!r}"
+            ) from None
+        if not (0 <= x_mm <= _MAX_X_MM) or abs(y_mm) > _MAX_ABS_Y_MM:
+            skipped_out_of_court += 1
+            continue
+
         is_home = _truthy(_pick(point, "local", "isLocal", "isHome"))
         if is_home is None:
             is_home = side_by_license.get(str(lic))
@@ -1035,12 +1056,18 @@ def _parse_shots_payload(payload: object, game_id: str, home_slug: str, away_slu
                 game_id=game_id,
                 player_id=str(lic),
                 team_id=home_slug if is_home else away_slug,
-                loc_x=float(x),
-                loc_y=float(y),
+                loc_x=x_mm,
+                loc_y=y_mm,
                 made=made,
                 shot_type=shot_type,
                 period=period,
             )
+        )
+    if skipped_out_of_court:
+        logger.warning(
+            "game_id=%s: %d tiro(s) descartado(s) por coordenadas fuera de pista "
+            "(|posY| > %d o posX fuera de 0-%d mm)",
+            game_id, skipped_out_of_court, _MAX_ABS_Y_MM, _MAX_X_MM,
         )
     if skipped_non_fg:
         logger.debug("game_id=%s: %d eventos no-tiro-de-campo descartados", game_id, skipped_non_fg)
