@@ -14,35 +14,35 @@
   ],
   "min_prior_games": 5,
   "test_frac": 0.2,
-  "n_train": 14545,
-  "n_test": 3635,
+  "n_train": 21865,
+  "n_test": 5468,
   "metrics": {
     "baseline": {
-      "accuracy": 0.573314993122421,
-      "log_loss": 0.682543232205109,
+      "accuracy": 0.5689465983906364,
+      "log_loss": 0.6842595629541236,
       "roc_auc": 0.5
     },
     "logreg": {
-      "accuracy": 0.6907840440165062,
-      "log_loss": 0.5833968479071301,
-      "roc_auc": 0.7481477493933082
+      "accuracy": 0.6845281638624726,
+      "log_loss": 0.5862094600575212,
+      "roc_auc": 0.745830109727387
     },
     "xgboost": {
-      "accuracy": 0.6894085281980743,
-      "log_loss": 0.5870602985923538,
-      "roc_auc": 0.7430606345234516
+      "accuracy": 0.6839795171909291,
+      "log_loss": 0.5878581755940742,
+      "roc_auc": 0.7437419085956507
     }
   },
   "logreg_metrics_by_source": {
     "acb": {
-      "n": 703,
-      "home_win_rate": 0.5761024182076814,
-      "accuracy": 0.6813655761024182
+      "n": 886,
+      "home_win_rate": 0.5835214446952596,
+      "accuracy": 0.6828442437923251
     },
     "eurocup": {
       "n": 164,
       "home_win_rate": 0.5914634146341463,
-      "accuracy": 0.676829268292683
+      "accuracy": 0.6707317073170732
     },
     "euroleague": {
       "n": 317,
@@ -50,34 +50,34 @@
       "accuracy": 0.6340694006309149
     },
     "feb": {
-      "n": 254,
-      "home_win_rate": 0.610236220472441,
-      "accuracy": 0.7086614173228346
+      "n": 640,
+      "home_win_rate": 0.6078125,
+      "accuracy": 0.7375
     },
     "lf2": {
-      "n": 29,
-      "home_win_rate": 0.6206896551724138,
-      "accuracy": 0.7931034482758621
+      "n": 30,
+      "home_win_rate": 0.6666666666666666,
+      "accuracy": 0.7666666666666667
     },
     "lfchallenge": {
-      "n": 200,
-      "home_win_rate": 0.53,
-      "accuracy": 0.77
+      "n": 214,
+      "home_win_rate": 0.5233644859813084,
+      "accuracy": 0.7757009345794392
     },
     "lfendesa": {
-      "n": 200,
-      "home_win_rate": 0.595,
-      "accuracy": 0.69
+      "n": 224,
+      "home_win_rate": 0.6026785714285714,
+      "accuracy": 0.7053571428571429
     },
     "nba": {
-      "n": 1621,
-      "home_win_rate": 0.5496607032695867,
-      "accuracy": 0.6921653300431833
+      "n": 2835,
+      "home_win_rate": 0.544620811287478,
+      "accuracy": 0.6701940035273368
     },
     "segundafeb": {
-      "n": 147,
-      "home_win_rate": 0.6054421768707483,
-      "accuracy": 0.7006802721088435
+      "n": 158,
+      "home_win_rate": 0.5886075949367089,
+      "accuracy": 0.6835443037974683
     }
   }
 }
